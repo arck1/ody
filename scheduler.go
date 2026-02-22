@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"schedulor/elector"
 	"schedulor/queue"
 	"time"
 
@@ -44,7 +43,16 @@ func NewLqScheduler(
 	logger *zap.SugaredLogger,
 	executor *LqExecutor,
 	options *LqSchedulerOptions,
-) *LqScheduler {
+) (*LqScheduler, error) {
+	if db == nil {
+		return nil, fmt.Errorf("scheduler db connector is nil")
+	}
+	if logger == nil {
+		return nil, fmt.Errorf("scheduler logger is nil")
+	}
+	if executor == nil {
+		return nil, fmt.Errorf("scheduler executor is nil")
+	}
 	settings := GetSettings(&LqSettings{
 		LqExecutorOptions:  &(executor.options),
 		LqSchedulerOptions: options,
@@ -54,23 +62,19 @@ func NewLqScheduler(
 		gocron.WithLocation(time.Local),
 	)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("create local scheduler: %w", err)
 	}
 	leaderElector := settings.LqSchedulerOptions.LeaderElector
-	if leaderElector == nil {
-		leaderElector = elector.NewPgLeaderElector(db, elector.Options{
-			LeaderKey: settings.LeaderKey,
-			LeaderId:  settings.LeaderId,
-			LeaderTTL: settings.LeaderTTL,
-		})
-	}
-	scheduler, err := gocron.NewScheduler(
-		gocron.WithDistributedElector(leaderElector),
+	schedulerOptions := []gocron.SchedulerOption{
 		gocron.WithLogger(LqLogger{logger}),
 		gocron.WithLocation(time.Local),
-	)
+	}
+	if leaderElector != nil {
+		schedulerOptions = append(schedulerOptions, gocron.WithDistributedElector(leaderElector))
+	}
+	scheduler, err := gocron.NewScheduler(schedulerOptions...)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("create scheduler: %w", err)
 	}
 	sch := &LqScheduler{
 		db:             db,
@@ -88,7 +92,7 @@ func NewLqScheduler(
 			gocron.WithSingletonMode(gocron.LimitModeReschedule),
 		)
 		if err != nil {
-			logger.Fatalw("failed to init leader heartbeat task", "err", err)
+			return nil, fmt.Errorf("init leader heartbeat task: %w", err)
 		}
 	}
 
@@ -96,7 +100,7 @@ func NewLqScheduler(
 		ctx := context.Background()
 		err = sch.refreshTasks(ctx)
 		if err != nil {
-			logger.Fatalw("failed to init refresh tasks", "err", err)
+			return nil, fmt.Errorf("init refresh tasks: %w", err)
 		}
 		_, err := sch.AddLocalJob(
 			gocron.DurationJob(settings.TasksRefreshTimeout),
@@ -104,11 +108,11 @@ func NewLqScheduler(
 			gocron.WithSingletonMode(gocron.LimitModeReschedule),
 		)
 		if err != nil {
-			panic(err)
+			return nil, fmt.Errorf("register refresh tasks job: %w", err)
 		}
 	}
 
-	return sch
+	return sch, nil
 }
 
 // AddJob registers a leader-aware scheduled job.

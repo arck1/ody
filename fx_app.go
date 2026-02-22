@@ -1,6 +1,10 @@
 package schedulor
 
-import "go.uber.org/fx"
+import (
+	"fmt"
+
+	"go.uber.org/fx"
+)
 
 // FxLifecycleComponent is minimal contract for fx-managed runtime components.
 type FxLifecycleComponent interface {
@@ -17,9 +21,9 @@ type FxAppOptions struct {
 }
 
 // NewFxApp creates ready-to-run fx app from provided lifecycle components.
-func NewFxApp(options FxAppOptions) *fx.App {
+func NewFxApp(options FxAppOptions) (*fx.App, error) {
 	if len(options.Components) == 0 {
-		panic("fx app requires at least one lifecycle component")
+		return nil, fmt.Errorf("fx app requires at least one lifecycle component")
 	}
 
 	fxOptions := make([]fx.Option, 0, len(options.Options)+2)
@@ -29,7 +33,7 @@ func NewFxApp(options FxAppOptions) *fx.App {
 	)
 	fxOptions = append(fxOptions, options.Options...)
 
-	return fx.New(fxOptions...)
+	return fx.New(fxOptions...), nil
 }
 
 func registerLifecycleComponents(lifecycle fx.Lifecycle, components []FxLifecycleComponent) {

@@ -32,15 +32,18 @@ func NewLqExecutor(
 	backend queue.QueueBackend,
 	exec TaskExecutor,
 	options *LqExecutorOptions,
-) *LqExecutor {
+) (*LqExecutor, error) {
 	settings := GetSettings(&LqSettings{
 		LqExecutorOptions: options,
 	}).LqExecutorOptions
+	if logger == nil {
+		return nil, fmt.Errorf("executor logger is nil")
+	}
 	if backend == nil {
-		panic("executor queue backend is nil")
+		return nil, fmt.Errorf("executor queue backend is nil")
 	}
 	if exec == nil {
-		panic("task executor strategy is nil")
+		return nil, fmt.Errorf("task executor strategy is nil")
 	}
 	return &LqExecutor{
 		Id:      getLeaderId(true),
@@ -48,7 +51,7 @@ func NewLqExecutor(
 		options: *settings,
 		queue:   backend,
 		exec:    exec,
-	}
+	}, nil
 }
 
 // GetQueue returns queue producer interface used by scheduler to enqueue tasks.

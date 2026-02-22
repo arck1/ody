@@ -25,17 +25,18 @@ func TestNewFxAppBuildsWithComponents(t *testing.T) {
 	started := &atomic.Bool{}
 	component := &testLifecycleComponent{started: started}
 
-	app := NewFxApp(FxAppOptions{Components: []FxLifecycleComponent{component}})
+	app, err := NewFxApp(FxAppOptions{Components: []FxLifecycleComponent{component}})
+	if err != nil {
+		t.Fatalf("NewFxApp error: %v", err)
+	}
 	if app == nil {
 		t.Fatalf("expected app instance")
 	}
 }
 
-func TestNewFxAppPanicsOnEmptyComponents(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatalf("expected panic")
-		}
-	}()
-	_ = NewFxApp(FxAppOptions{})
+func TestNewFxAppReturnsErrorOnEmptyComponents(t *testing.T) {
+	_, err := NewFxApp(FxAppOptions{})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
 }

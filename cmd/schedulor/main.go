@@ -9,7 +9,9 @@ import (
 	"schedulor"
 	"schedulor/queue"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"go.uber.org/zap"
 )
@@ -27,6 +29,8 @@ type cliConfig struct {
 	dbDSN            string
 	executorType     string
 	bashCommandsFile string
+	executorTaskNames string
+	commandField      string
 	logLevel         string
 	withScheduler    bool
 }
@@ -47,6 +51,9 @@ func main() {
 	defer logger.Sync()
 	sugared := logger.Sugar()
 
+	if err := schedulor.LoadSettingsFromEnv(); err != nil {
+		sugared.Fatalw("failed to load settings from env", "err", err)
+	}
 	settings := schedulor.GetSettings(nil)
 	runtime, err := buildBackendRuntime(context.Background(), cfg, settings, sugared)
 	if err != nil {
@@ -57,35 +64,43 @@ func main() {
 	}
 
 	taskExec := buildTaskExecutor(cfg, sugared)
-	lqExecutor := schedulor.NewLqExecutor(sugared, runtime.backend, taskExec, settings.LqExecutorOptions)
+	lqExecutor, err := schedulor.NewLqExecutor(sugared, runtime.backend, taskExec, settings.LqExecutorOptions)
+	if err != nil {
+		sugared.Fatalw("failed to create executor", "err", err)
+	}
 	components := []schedulor.FxLifecycleComponent{lqExecutor}
 
 	if cfg.withScheduler {
 		if runtime.db == nil {
 			sugared.Fatalw("selected backend does not provide db connector required by scheduler", "backend", cfg.queueBackend)
 		}
-		lqScheduler := schedulor.NewLqScheduler(runtime.db, sugared, lqExecutor, settings.LqSchedulerOptions)
+		lqScheduler, schedulerErr := schedulor.NewLqScheduler(runtime.db, sugared, lqExecutor, settings.LqSchedulerOptions)
+		if schedulerErr != nil {
+			sugared.Fatalw("failed to create scheduler", "err", schedulerErr)
+		}
 		components = append(components, lqScheduler)
 	}
 
-	app := schedulor.NewFxApp(schedulor.FxAppOptions{Components: components})
+	app, err := schedulor.NewFxApp(schedulor.FxAppOptions{Components: components})
+	if err != nil {
+		sugared.Fatalw("failed to create fx app", "err", err)
+	}
 	app.Run()
 }
 
 func parseConfig() cliConfig {
 	cfg := cliConfig{}
-	flag.StringVar(&cfg.queueBackend, "queue-backend", envOrDefault("SCHEDULOR_QUEUE_BACKEND", "postgres"), "Queue backend: postgres")
+	flag.StringVar(&cfg.queueBackend, "queue-backend", envOrDefault("SCHEDULOR_QUEUE_BACKEND", "postgres"), "Queue backend: postgres|redis|kafka|noop")
 	flag.StringVar(&cfg.dbDSN, "db-dsn", envOrDefault("SCHEDULOR_DB_DSN", ""), "PostgreSQL DSN (required for postgres backend)")
-	flag.StringVar(&cfg.executorType, "executor", envOrDefault("SCHEDULOR_EXECUTOR", "bash_file"), "Executor type: bash_file")
+	flag.StringVar(&cfg.executorType, "executor", envOrDefault("SCHEDULOR_EXECUTOR", "bash_file"), "Executor type: bash_file|bash_payload")
 	flag.StringVar(&cfg.bashCommandsFile, "bash-commands-file", envOrDefault("SCHEDULOR_BASH_COMMANDS_FILE", ""), "Path to JSON file with bash commands")
+	flag.StringVar(&cfg.executorTaskNames, "executor-task-names", envOrDefault("SCHEDULOR_EXECUTOR_TASK_NAMES", "bash"), "Comma-separated task names for bash_payload executor")
+	flag.StringVar(&cfg.commandField, "executor-command-field", envOrDefault("SCHEDULOR_EXECUTOR_COMMAND_FIELD", "command"), "Payload field with shell command for bash_payload executor")
 	flag.StringVar(&cfg.logLevel, "log-level", envOrDefault("SCHEDULOR_LOG_LEVEL", "info"), "Logger level: debug|info|warn|error")
 	flag.BoolVar(&cfg.withScheduler, "with-scheduler", envBoolOrDefault("SCHEDULOR_WITH_SCHEDULER", true), "Run scheduler component")
 	flag.Parse()
 
-	if cfg.executorType != "bash_file" {
-		fail("only --executor=bash_file is supported in CLI")
-	}
-	if cfg.bashCommandsFile == "" {
+	if cfg.executorType == "bash_file" && cfg.bashCommandsFile == "" {
 		fail("SCHEDULOR_BASH_COMMANDS_FILE (or --bash-commands-file) is required")
 	}
 	return cfg
@@ -99,12 +114,51 @@ func buildBackendRuntime(
 ) (*backendRuntime, error) {
 	factories := map[string]backendFactory{
 		"postgres": postgresBackendFactory{},
+		"redis":    redisBackendFactory{},
+		"kafka":    kafkaBackendFactory{},
+		"noop":     noopBackendFactory{},
 	}
 	factory, ok := factories[cfg.queueBackend]
 	if !ok {
 		return nil, fmt.Errorf("unsupported queue backend %q", cfg.queueBackend)
 	}
 	return factory.Build(ctx, cfg, settings, logger)
+}
+
+type redisBackendFactory struct{}
+
+func (redisBackendFactory) Build(
+	ctx context.Context,
+	cfg cliConfig,
+	settings schedulor.LqSettings,
+	logger *zap.SugaredLogger,
+) (*backendRuntime, error) {
+	logger.Infow("initialized queue backend", "backend", "redis")
+	return &backendRuntime{backend: queue.NewRedisQueue()}, nil
+}
+
+type kafkaBackendFactory struct{}
+
+func (kafkaBackendFactory) Build(
+	ctx context.Context,
+	cfg cliConfig,
+	settings schedulor.LqSettings,
+	logger *zap.SugaredLogger,
+) (*backendRuntime, error) {
+	logger.Infow("initialized queue backend", "backend", "kafka")
+	return &backendRuntime{backend: queue.NewKafkaQueue()}, nil
+}
+
+type noopBackendFactory struct{}
+
+func (noopBackendFactory) Build(
+	ctx context.Context,
+	cfg cliConfig,
+	settings schedulor.LqSettings,
+	logger *zap.SugaredLogger,
+) (*backendRuntime, error) {
+	logger.Infow("initialized queue backend", "backend", "noop")
+	return &backendRuntime{backend: noopQueue{}}, nil
 }
 
 type postgresBackendFactory struct{}
@@ -127,7 +181,7 @@ func (postgresBackendFactory) Build(
 		return nil, fmt.Errorf("ping db: %w", err)
 	}
 	connector := sqlConnector{db: db}
-	backend := queue.NewPostgresQueue(connector, &queue.PostgresQueueOptions{
+	backend := queue.NewPostgresQueue(connector, queue.PostgresQueueOptions{
 		TaskMaxAttempts: settings.TaskMaxAttempts,
 		TaskVisibility:  settings.TaskVisibility,
 	})
@@ -140,11 +194,19 @@ func (postgresBackendFactory) Build(
 }
 
 func buildTaskExecutor(cfg cliConfig, logger *zap.SugaredLogger) schedulor.TaskExecutor {
-	taskExec, err := schedulor.NewBashFileTaskExecutorFromFile(cfg.bashCommandsFile)
-	if err != nil {
-		logger.Fatalw("failed to load bash executor config", "file", cfg.bashCommandsFile, "err", err)
+	switch cfg.executorType {
+	case "bash_file":
+		taskExec, err := schedulor.NewBashFileTaskExecutorFromFile(cfg.bashCommandsFile)
+		if err != nil {
+			logger.Fatalw("failed to load bash executor config", "file", cfg.bashCommandsFile, "err", err)
+		}
+		return taskExec
+	case "bash_payload":
+		return schedulor.NewBashTaskExecutor(splitCSV(cfg.executorTaskNames), cfg.commandField)
+	default:
+		logger.Fatalw("unsupported executor type", "executor", cfg.executorType)
 	}
-	return taskExec
+	return nil
 }
 
 func newLogger(level string) *zap.Logger {
@@ -189,6 +251,55 @@ func envBoolOrDefault(key string, fallback bool) bool {
 		fail(fmt.Sprintf("invalid boolean value %q for %s", value, key))
 		return fallback
 	}
+}
+
+func splitCSV(input string) []string {
+	parts := strings.Split(input, ",")
+	result := make([]string, 0, len(parts))
+	for _, item := range parts {
+		trimmed := strings.TrimSpace(item)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+type noopQueue struct{}
+
+func (noopQueue) Enqueue(
+	ctx context.Context,
+	taskName string,
+	payload queue.JSONPayload,
+	availableAt time.Time,
+	idemKey string,
+) (*int64, error) {
+	id := int64(0)
+	return &id, nil
+}
+
+func (noopQueue) Claim(ctx context.Context, tasks []string, limit int) ([]queue.Claimed, error) {
+	return nil, nil
+}
+
+func (noopQueue) StartHeartbeat(ctx context.Context, taskId int64, leaseToken uuid.UUID, lost chan struct{}) {}
+
+func (noopQueue) Ack(ctx context.Context, taskId int64, leaseToken uuid.UUID) (bool, error) {
+	return true, nil
+}
+
+func (noopQueue) Nack(
+	ctx context.Context,
+	taskId int64,
+	leaseToken uuid.UUID,
+	errText string,
+	delay time.Duration,
+) (bool, error) {
+	return true, nil
+}
+
+func (noopQueue) MoveToDLQ(ctx context.Context, taskId int64) (bool, error) {
+	return true, nil
 }
 
 func fail(message string) {

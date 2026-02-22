@@ -34,7 +34,7 @@ func TestPostgresQueueLifecycleIntegration(t *testing.T) {
 	t.Parallel()
 
 	db := setupIntegrationDB(t)
-	q := queue.NewPostgresQueue(sqlConnector{db: db}, &queue.PostgresQueueOptions{
+	q := queue.NewPostgresQueue(sqlConnector{db: db}, queue.PostgresQueueOptions{
 		TaskMaxAttempts: 2,
 		TaskVisibility:  500 * time.Millisecond,
 	})
@@ -106,13 +106,13 @@ func TestExecutorWithPostgresQueueIntegration(t *testing.T) {
 	t.Parallel()
 
 	db := setupIntegrationDB(t)
-	q := queue.NewPostgresQueue(sqlConnector{db: db}, &queue.PostgresQueueOptions{
+	q := queue.NewPostgresQueue(sqlConnector{db: db}, queue.PostgresQueueOptions{
 		TaskMaxAttempts: 3,
 		TaskVisibility:  500 * time.Millisecond,
 	})
 
 	var handled atomic.Int32
-	exec := NewLqExecutor(
+	exec, err := NewLqExecutor(
 		testLogger(),
 		q,
 		NewCodeTaskExecutor([]TaskHandler{{
@@ -124,6 +124,9 @@ func TestExecutorWithPostgresQueueIntegration(t *testing.T) {
 		}}),
 		&LqExecutorOptions{PoolingTimeout: 10 * time.Millisecond, PoolingBatch: 1},
 	)
+	if err != nil {
+		t.Fatalf("NewLqExecutor error: %v", err)
+	}
 
 	payload, err := queue.NewJSONPayload(map[string]any{"x": 1})
 	if err != nil {

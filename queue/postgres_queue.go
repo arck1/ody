@@ -16,23 +16,11 @@ type PostgresQueue struct {
 	options PostgresQueueOptions
 }
 
-// NewPostgresQueue creates Postgres-backed queue with defaults merged from options.
-func NewPostgresQueue(db DbConnector, options *PostgresQueueOptions) *PostgresQueue {
-	resolved := PostgresQueueOptions{
-		TaskMaxAttempts: 25,
-		TaskVisibility:  60 * time.Second,
-	}
-	if options != nil {
-		if options.TaskMaxAttempts > 0 {
-			resolved.TaskMaxAttempts = options.TaskMaxAttempts
-		}
-		if options.TaskVisibility > 0 {
-			resolved.TaskVisibility = options.TaskVisibility
-		}
-	}
+// NewPostgresQueue creates Postgres-backed queue from explicit options.
+func NewPostgresQueue(db DbConnector, options PostgresQueueOptions) *PostgresQueue {
 	return &PostgresQueue{
 		db:      db,
-		options: resolved,
+		options: options,
 	}
 }
 

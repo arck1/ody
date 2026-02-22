@@ -12,10 +12,12 @@ go run ./cmd/schedulor
 
 Параметры CLI:
 
-- `--queue-backend` или `SCHEDULOR_QUEUE_BACKEND` (`postgres`)
+- `--queue-backend` или `SCHEDULOR_QUEUE_BACKEND` (`postgres|redis|kafka|noop`)
 - `--db-dsn` или `SCHEDULOR_DB_DSN`
-- `--executor` или `SCHEDULOR_EXECUTOR` (сейчас поддерживается только `bash_file`)
+- `--executor` или `SCHEDULOR_EXECUTOR` (`bash_file|bash_payload`)
 - `--bash-commands-file` или `SCHEDULOR_BASH_COMMANDS_FILE`
+- `--executor-task-names` или `SCHEDULOR_EXECUTOR_TASK_NAMES`
+- `--executor-command-field` или `SCHEDULOR_EXECUTOR_COMMAND_FIELD`
 - `--with-scheduler` или `SCHEDULOR_WITH_SCHEDULER` (`true`)
 - `--log-level` или `SCHEDULOR_LOG_LEVEL` (`debug|info|warn|error`)
 
@@ -33,18 +35,31 @@ if err != nil {
   panic(err)
 }
 
-executor := schedulor.NewLqExecutor(logger, backend, taskExec, &schedulor.LqExecutorOptions{
+if err := schedulor.LoadSettingsFromEnv(); err != nil {
+  panic(err)
+}
+
+executor, err := schedulor.NewLqExecutor(logger, backend, taskExec, &schedulor.LqExecutorOptions{
   PoolingTimeout: 30 * time.Second,
   PoolingBatch:   1,
 })
-scheduler := schedulor.NewLqScheduler(db, logger, executor, &schedulor.LqSchedulerOptions{
+if err != nil {
+  panic(err)
+}
+scheduler, err := schedulor.NewLqScheduler(db, logger, executor, &schedulor.LqSchedulerOptions{
   TasksRefreshEnabled: true,
   TasksRefreshTimeout: 30 * time.Minute,
 })
+if err != nil {
+  panic(err)
+}
 
-app := schedulor.NewFxApp(schedulor.FxAppOptions{
+app, err := schedulor.NewFxApp(schedulor.FxAppOptions{
   Components: []schedulor.FxLifecycleComponent{executor, scheduler},
 })
+if err != nil {
+  panic(err)
+}
 app.Run()
 ```
 
@@ -59,7 +74,7 @@ app.Run()
 1. Загрузи стратегию:
 `exec, err := NewBashFileTaskExecutorFromFile("/absolute/path/to/commands.json")`
 2. Передай ее в `NewLqExecutor` вместе с queue backend:
-`lq := NewLqExecutor(logger, backend, exec, options)`
+`lq, err := NewLqExecutor(logger, backend, exec, options)`
 
 Пример `commands.json`:
 

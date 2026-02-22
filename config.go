@@ -2,7 +2,6 @@ package schedulor
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"schedulor/elector"
 	"time"
@@ -95,19 +94,15 @@ var defaultSettings = LqSettings{
 	},
 }
 
-func init() {
-	loadSettingsFromEnv()
+// loadSettingsFromEnv applies optional .env and environment variable overrides.
+func loadSettingsFromEnv() error {
+	_ = godotenv.Load(".env")
+	return env.Parse(&defaultSettings)
 }
 
-// loadSettingsFromEnv applies optional .env and environment variable overrides.
-func loadSettingsFromEnv() {
-	err := godotenv.Load(".env")
-	if err != nil {
-		log.Printf("Error loading .env file: %v", err)
-	}
-	if err = env.Parse(&defaultSettings); err != nil {
-		log.Fatalf("Error reading the environment variables: %v", err)
-	}
+// LoadSettingsFromEnv applies .env and environment variable overrides to package defaults.
+func LoadSettingsFromEnv() error {
+	return loadSettingsFromEnv()
 }
 
 // GetSettings merges provided options with defaults and environment overrides.

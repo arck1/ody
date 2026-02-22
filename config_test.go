@@ -17,7 +17,9 @@ func TestLoadSettingsFromEnvironment(t *testing.T) {
 	}()
 	os.Setenv("local_queue.postgres_queue.task_max_attempts", "999")
 	os.Setenv("local_queue.scheduler.tasks_refresh_timeout", "45s")
-	loadSettingsFromEnv()
+	if err := loadSettingsFromEnv(); err != nil {
+		t.Fatalf("loadSettingsFromEnv error: %v", err)
+	}
 
 	want := defaultSettings
 

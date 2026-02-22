@@ -74,10 +74,13 @@ func TestBashTaskExecutorValidation(t *testing.T) {
 
 func TestExecutorProcessTaskPanic(t *testing.T) {
 	panicExec := &panicTaskExecutor{}
-	e := NewLqExecutor(testLogger(), &testQueueBackend{}, panicExec, &LqExecutorOptions{PoolingTimeout: 1, PoolingBatch: 1})
+	e, err := NewLqExecutor(testLogger(), &testQueueBackend{}, panicExec, &LqExecutorOptions{PoolingTimeout: 1, PoolingBatch: 1})
+	if err != nil {
+		t.Fatalf("NewLqExecutor error: %v", err)
+	}
 
 	payload, _ := queue.NewJSONPayload(map[string]any{"foo": "bar"})
-	err := e.processTask(context.Background(), queue.Claimed{TaskID: 99, TaskName: "panic", Payload: payload})
+	err = e.processTask(context.Background(), queue.Claimed{TaskID: 99, TaskName: "panic", Payload: payload})
 	if err == nil || !strings.Contains(err.Error(), "task handler panic") {
 		t.Fatalf("expected panic error, got: %v", err)
 	}

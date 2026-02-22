@@ -13,7 +13,10 @@ func TestNewLqExecutorUsesProvidedInterfaces(t *testing.T) {
 		},
 	}})
 	backend := &testQueueBackend{}
-	exec := NewLqExecutor(testLogger(), backend, strategy, &LqExecutorOptions{PoolingTimeout: 10, PoolingBatch: 1})
+	exec, err := NewLqExecutor(testLogger(), backend, strategy, &LqExecutorOptions{PoolingTimeout: 10, PoolingBatch: 1})
+	if err != nil {
+		t.Fatalf("NewLqExecutor error: %v", err)
+	}
 
 	if exec.queue != backend {
 		t.Fatalf("expected provided backend to be used")
@@ -23,20 +26,16 @@ func TestNewLqExecutorUsesProvidedInterfaces(t *testing.T) {
 	}
 }
 
-func TestNewLqExecutorPanicsOnNilBackend(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatalf("expected panic for nil backend")
-		}
-	}()
-	_ = NewLqExecutor(testLogger(), nil, NewCodeTaskExecutor(nil), &LqExecutorOptions{PoolingTimeout: 10, PoolingBatch: 1})
+func TestNewLqExecutorReturnsErrorOnNilBackend(t *testing.T) {
+	_, err := NewLqExecutor(testLogger(), nil, NewCodeTaskExecutor(nil), &LqExecutorOptions{PoolingTimeout: 10, PoolingBatch: 1})
+	if err == nil {
+		t.Fatalf("expected error for nil backend")
+	}
 }
 
-func TestNewLqExecutorPanicsOnNilExecutor(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatalf("expected panic for nil executor")
-		}
-	}()
-	_ = NewLqExecutor(testLogger(), &testQueueBackend{}, nil, &LqExecutorOptions{PoolingTimeout: 10, PoolingBatch: 1})
+func TestNewLqExecutorReturnsErrorOnNilExecutor(t *testing.T) {
+	_, err := NewLqExecutor(testLogger(), &testQueueBackend{}, nil, &LqExecutorOptions{PoolingTimeout: 10, PoolingBatch: 1})
+	if err == nil {
+		t.Fatalf("expected error for nil executor")
+	}
 }

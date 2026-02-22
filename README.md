@@ -12,9 +12,11 @@ go run ./cmd/schedulor
 
 Параметры CLI:
 
+- `--queue-backend` или `SCHEDULOR_QUEUE_BACKEND` (`postgres`)
 - `--db-dsn` или `SCHEDULOR_DB_DSN`
 - `--executor` или `SCHEDULOR_EXECUTOR` (сейчас поддерживается только `bash_file`)
 - `--bash-commands-file` или `SCHEDULOR_BASH_COMMANDS_FILE`
+- `--with-scheduler` или `SCHEDULOR_WITH_SCHEDULER` (`true`)
 - `--log-level` или `SCHEDULOR_LOG_LEVEL` (`debug|info|warn|error`)
 
 ## Fx Entry Point

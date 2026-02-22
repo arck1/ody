@@ -19,6 +19,7 @@ type LqPostgresQueueOptions struct {
 	TaskVisibility time.Duration `env:"local_queue.postgres_queue.task_visibility"`
 }
 
+// LqSchedulerOptions configures scheduler refresh and leader integration behavior.
 type LqSchedulerOptions struct {
 	// TasksRefreshEnabled Включает обновление задач из базы данных
 	TasksRefreshEnabled bool `env:"local_queue.scheduler.tasks_refresh_enabled"`
@@ -28,6 +29,7 @@ type LqSchedulerOptions struct {
 	LeaderElector elector.LeaderElector `env:"-"`
 }
 
+// LqLeaderElectorOptions configures distributed leader election.
 type LqLeaderElectorOptions struct {
 	// LeaderKey Ключ группы для выбора лидера
 	LeaderKey string `env:"local_queue.leader_elector.leader_key"`
@@ -39,6 +41,7 @@ type LqLeaderElectorOptions struct {
 	LeaderHeartbeatEnabled bool `env:"local_queue.leader_elector.leader_heartbeat_enabled"`
 }
 
+// LqExecutorOptions configures executor polling loop and execution mode.
 type LqExecutorOptions struct {
 	// Время ожидания между проверками наличия задач
 	PoolingTimeout time.Duration `env:"local_queue.executor.pooling_timeout"`
@@ -49,10 +52,16 @@ type LqExecutorOptions struct {
 	// Путь к JSON-файлу с bash-командами (для режима bash_file)
 	BashCommandsFile string `env:"local_queue.executor.bash_commands_file"`
 }
+
+// LqSettings combines all library options in a single structure.
 type LqSettings struct {
+	// LqPostgresQueueOptions configures queue backend.
 	*LqPostgresQueueOptions
+	// LqSchedulerOptions configures scheduler behavior.
 	*LqSchedulerOptions
+	// LqLeaderElectorOptions configures distributed leader election.
 	*LqLeaderElectorOptions
+	// LqExecutorOptions configures executor loop and execution mode.
 	*LqExecutorOptions
 }
 
@@ -95,6 +104,7 @@ func init() {
 	loadSettingsFromEnv()
 }
 
+// loadSettingsFromEnv applies optional .env and environment variable overrides.
 func loadSettingsFromEnv() {
 	err := godotenv.Load(".env")
 	if err != nil {
@@ -105,11 +115,13 @@ func loadSettingsFromEnv() {
 	}
 }
 
+// GetSettings merges provided options with defaults and environment overrides.
 func GetSettings(options *LqSettings) LqSettings {
 	settings := mergeOptionsWithDefault(options)
 	return settings
 }
 
+// mergeOptionsWithDefault fills empty settings values with defaults.
 func mergeOptionsWithDefault(options *LqSettings) LqSettings {
 	if options == nil {
 		return defaultSettings

@@ -11,14 +11,18 @@ import (
 	"github.com/samber/lo"
 )
 
+// BashFileTaskExecutor executes shell commands mapped by task name from config file.
 type BashFileTaskExecutor struct {
+	// commands maps task names to shell commands.
 	commands map[string]string
 }
 
+// NewBashFileTaskExecutor creates executor from provided task->command mapping.
 func NewBashFileTaskExecutor(commands map[string]string) *BashFileTaskExecutor {
 	return &BashFileTaskExecutor{commands: commands}
 }
 
+// NewBashFileTaskExecutorFromFile loads executor command mapping from JSON file.
 func NewBashFileTaskExecutorFromFile(path string) (*BashFileTaskExecutor, error) {
 	commands, err := loadBashCommands(path)
 	if err != nil {
@@ -27,8 +31,10 @@ func NewBashFileTaskExecutorFromFile(path string) (*BashFileTaskExecutor, error)
 	return NewBashFileTaskExecutor(commands), nil
 }
 
+// TaskNames returns task names available in loaded command mapping.
 func (e *BashFileTaskExecutor) TaskNames() []string { return lo.Keys(e.commands) }
 
+// Execute runs preconfigured bash command for claimed task name.
 func (e *BashFileTaskExecutor) Execute(ctx context.Context, task queue2.Claimed) error {
 	command, ok := e.commands[task.TaskName]
 	if !ok {
@@ -43,13 +49,16 @@ func (e *BashFileTaskExecutor) Execute(ctx context.Context, task queue2.Claimed)
 }
 
 type bashCommandsConfig struct {
+	// Tasks is compact map representation task_name -> command.
 	Tasks map[string]string `json:"tasks"`
-	List  []struct {
+	// List is verbose list representation of commands.
+	List []struct {
 		TaskName string `json:"task_name"`
 		Command  string `json:"command"`
 	} `json:"list"`
 }
 
+// loadBashCommands parses JSON config and returns normalized command map.
 func loadBashCommands(path string) (map[string]string, error) {
 	if path == "" {
 		return nil, fmt.Errorf("bash commands file path is empty")

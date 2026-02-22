@@ -8,11 +8,15 @@ import (
 	"github.com/google/uuid"
 )
 
+// PostgresQueue is SQL implementation of QueueBackend over Postgres tables.
 type PostgresQueue struct {
-	db      DbConnector
+	// db provides SQL connections.
+	db DbConnector
+	// options controls retry and visibility behavior.
 	options PostgresQueueOptions
 }
 
+// NewPostgresQueue creates Postgres-backed queue with defaults merged from options.
 func NewPostgresQueue(db DbConnector, options *PostgresQueueOptions) *PostgresQueue {
 	resolved := PostgresQueueOptions{
 		TaskMaxAttempts: 25,
@@ -32,10 +36,12 @@ func NewPostgresQueue(db DbConnector, options *PostgresQueueOptions) *PostgresQu
 	}
 }
 
+// GetNewLeaseToken returns unique token used to track task claim ownership.
 func (q *PostgresQueue) GetNewLeaseToken() uuid.UUID {
 	return uuid.New()
 }
 
+// Enqueue stores task in lq_tasks and returns task id.
 func (q *PostgresQueue) Enqueue(
 	ctx context.Context,
 	taskName string,
@@ -72,6 +78,7 @@ func (q *PostgresQueue) Enqueue(
 	return &taskID, nil
 }
 
+// Claim reserves ready tasks atomically and returns claimed rows.
 func (q *PostgresQueue) Claim(ctx context.Context, tasks []string, limit int) ([]Claimed, error) {
 	db, err := q.db.GetConnect(ctx)
 	if err != nil {
@@ -138,10 +145,12 @@ func (q *PostgresQueue) Claim(ctx context.Context, tasks []string, limit int) ([
 	return claimed, nil
 }
 
+// GetHeartbeatTicker creates ticker used for lease extension.
 func (q *PostgresQueue) GetHeartbeatTicker() *time.Ticker {
 	return time.NewTicker(q.options.TaskVisibility / 3)
 }
 
+// StartHeartbeat periodically extends task lease until context cancellation or lease loss.
 func (q *PostgresQueue) StartHeartbeat(
 	ctx context.Context,
 	taskID int64,
@@ -167,6 +176,7 @@ func (q *PostgresQueue) StartHeartbeat(
 	}
 }
 
+// Heartbeat extends current task lease when token matches active reservation.
 func (q *PostgresQueue) Heartbeat(
 	ctx context.Context,
 	taskID int64,
@@ -196,6 +206,7 @@ func (q *PostgresQueue) Heartbeat(
 	return rows > 0, nil
 }
 
+// Ack confirms task completion and removes task row.
 func (q *PostgresQueue) Ack(ctx context.Context, taskID int64, leaseToken uuid.UUID) (bool, error) {
 	db, err := q.db.GetConnect(ctx)
 	if err != nil {
@@ -217,6 +228,7 @@ func (q *PostgresQueue) Ack(ctx context.Context, taskID int64, leaseToken uuid.U
 	return rows > 0, nil
 }
 
+// Nack marks task failure and schedules next availability with delay.
 func (q *PostgresQueue) Nack(
 	ctx context.Context,
 	taskID int64,
@@ -251,6 +263,7 @@ func (q *PostgresQueue) Nack(
 	return rows > 0, nil
 }
 
+// MoveToDLQ moves exhausted task into lq_tasks_dlq in a transaction.
 func (q *PostgresQueue) MoveToDLQ(ctx context.Context, taskID int64) (bool, error) {
 	db, err := q.db.GetConnect(ctx)
 	if err != nil {

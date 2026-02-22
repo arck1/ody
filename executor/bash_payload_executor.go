@@ -7,11 +7,15 @@ import (
 	queue2 "schedulor/queue"
 )
 
+// BashPayloadTaskExecutor executes shell commands from task payload fields.
 type BashPayloadTaskExecutor struct {
-	taskNames    []string
+	// taskNames limits which queue task names are polled.
+	taskNames []string
+	// commandField points to payload field containing shell command.
 	commandField string
 }
 
+// NewBashPayloadTaskExecutor creates executor that reads command from task payload.
 func NewBashPayloadTaskExecutor(taskNames []string, commandField string) *BashPayloadTaskExecutor {
 	if len(taskNames) == 0 {
 		taskNames = []string{"bash"}
@@ -22,8 +26,10 @@ func NewBashPayloadTaskExecutor(taskNames []string, commandField string) *BashPa
 	return &BashPayloadTaskExecutor{taskNames: taskNames, commandField: commandField}
 }
 
+// TaskNames returns supported task names.
 func (e *BashPayloadTaskExecutor) TaskNames() []string { return e.taskNames }
 
+// Execute runs bash command from payload field.
 func (e *BashPayloadTaskExecutor) Execute(ctx context.Context, task queue2.Claimed) error {
 	commandRaw, ok := task.Payload.Data()[e.commandField]
 	if !ok {

@@ -12,15 +12,23 @@ import (
 	"go.uber.org/zap"
 )
 
+// LqExecutor polls queue backend and dispatches claimed tasks to selected executor strategy.
 type LqExecutor struct {
-	Id      string
-	db      DbConnector
-	logger  *zap.SugaredLogger
-	queue   queue2.QueueBackend
-	exec    TaskExecutor
+	// Id is a unique executor identity used for diagnostics.
+	Id string
+	// db provides SQL connections.
+	db DbConnector
+	// logger writes executor events and errors.
+	logger *zap.SugaredLogger
+	// queue is a backend used to claim/ack/nack tasks.
+	queue queue2.QueueBackend
+	// exec performs actual task business logic.
+	exec TaskExecutor
+	// options controls polling and batching behavior.
 	options LqExecutorOptions
 }
 
+// NewLqExecutor builds executor with default queue backend and selected execution mode.
 func NewLqExecutor(
 	db DbConnector,
 	logger *zap.SugaredLogger,
@@ -55,6 +63,7 @@ func NewLqExecutor(
 	)
 }
 
+// NewLqExecutorWith builds executor with explicitly provided queue backend and executor strategy.
 func NewLqExecutorWith(
 	db DbConnector,
 	logger *zap.SugaredLogger,
@@ -85,11 +94,15 @@ func NewLqExecutorWith(
 	}
 }
 
+// GetQueue returns queue producer interface used by scheduler to enqueue tasks.
 func (e *LqExecutor) GetQueue() queue2.TasksQueue {
 	return e.queue
 }
+
+// GetOptions returns resolved executor options.
 func (e *LqExecutor) GetOptions() LqExecutorOptions { return e.options }
 
+// Init registers executor lifecycle hooks in fx.
 func (e *LqExecutor) Init(lifecycle fx.Lifecycle) {
 	executorCtx, cancel := context.WithCancel(context.Background())
 	lifecycle.Append(fx.Hook{
@@ -104,6 +117,7 @@ func (e *LqExecutor) Init(lifecycle fx.Lifecycle) {
 	})
 }
 
+// Run starts polling loop that claims tasks and processes them.
 func (e *LqExecutor) Run(ctx context.Context) {
 	tasksNames := e.exec.TaskNames()
 	if len(tasksNames) == 0 {
@@ -167,6 +181,7 @@ func (e *LqExecutor) Run(ctx context.Context) {
 	}
 }
 
+// processTask executes a single task and converts panics to errors.
 func (e *LqExecutor) processTask(ctx context.Context, task queue2.Claimed) (err error) {
 	defer func() {
 		if panicErr := recover(); panicErr != nil {

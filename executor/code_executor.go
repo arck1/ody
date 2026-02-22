@@ -7,10 +7,13 @@ import (
 	"github.com/samber/lo"
 )
 
+// CodeTaskExecutor executes tasks using in-process Go handlers.
 type CodeTaskExecutor struct {
+	// tasks is map of task name to business handler.
 	tasks map[string]TaskHandlerFunc
 }
 
+// NewCodeTaskExecutor creates in-process executor from handlers list.
 func NewCodeTaskExecutor(tasks []TaskHandler) *CodeTaskExecutor {
 	return &CodeTaskExecutor{
 		tasks: lo.Associate(tasks, func(item TaskHandler) (string, TaskHandlerFunc) {
@@ -19,10 +22,12 @@ func NewCodeTaskExecutor(tasks []TaskHandler) *CodeTaskExecutor {
 	}
 }
 
+// TaskNames returns registered task names.
 func (e *CodeTaskExecutor) TaskNames() []string {
 	return lo.Keys(e.tasks)
 }
 
+// Execute runs mapped Go handler for claimed task.
 func (e *CodeTaskExecutor) Execute(ctx context.Context, task queue2.Claimed) error {
 	handler, ok := e.tasks[task.TaskName]
 	if !ok {

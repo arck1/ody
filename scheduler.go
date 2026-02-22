@@ -16,23 +16,29 @@ import (
 	"go.uber.org/fx"
 )
 
+// LqSchedulerType describes scheduler lifecycle integration contract.
 type LqSchedulerType interface {
+	// Init registers scheduler lifecycle hooks in fx.
 	Init(lifecycle fx.Lifecycle)
 }
 
+// LqScheduler manages cron schedules and enqueues runtime tasks.
 type LqScheduler struct {
-	db     DbConnector
+	// db provides SQL connections for reading/updating schedules.
+	db DbConnector
+	// logger writes scheduler events and warnings.
 	logger *zap.SugaredLogger
-	// scheduler Запускает задачи с проверкой лидерсва
+	// scheduler runs leader-only jobs.
 	scheduler gocron.Scheduler
-	// localScheduler Запускает задачи на каждом инстансе вне зависимости от лидерства
+	// localScheduler runs jobs on every instance regardless of leadership.
 	localScheduler gocron.Scheduler
-	// queue Очередь для постановки задач на выполнение
+	// queue is used to enqueue executable tasks.
 	queue queue2.TasksQueue
-	// settings Настройки
+	// options stores resolved scheduler options.
 	options LqSchedulerOptions
 }
 
+// NewLqScheduler creates scheduler instances and registers internal maintenance jobs.
 func NewLqScheduler(
 	db DbConnector,
 	logger *zap.SugaredLogger,
@@ -105,6 +111,7 @@ func NewLqScheduler(
 	return sch
 }
 
+// AddJob registers a leader-aware scheduled job.
 func (s *LqScheduler) AddJob(
 	definition gocron.JobDefinition,
 	task gocron.Task,
@@ -117,6 +124,7 @@ func (s *LqScheduler) AddJob(
 	)
 }
 
+// AddLocalJob registers a schedule that runs on every instance.
 func (s *LqScheduler) AddLocalJob(
 	definition gocron.JobDefinition,
 	task gocron.Task,
@@ -129,6 +137,7 @@ func (s *LqScheduler) AddLocalJob(
 	)
 }
 
+// Init registers scheduler start/stop hooks in fx lifecycle.
 func (s *LqScheduler) Init(lifecycle fx.Lifecycle) {
 	lifecycle.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
@@ -146,10 +155,12 @@ func (s *LqScheduler) Init(lifecycle fx.Lifecycle) {
 	})
 }
 
+// leaderHeartbeat is a no-op task to keep leader lease active.
 func (s *LqScheduler) leaderHeartbeat(ctx context.Context) error {
 	return nil
 }
 
+// refreshTasks syncs in-memory cron jobs with DB schedules.
 func (s *LqScheduler) refreshTasks(ctx context.Context) error {
 	s.logger.Info("Refresh Tasks")
 	db, err := s.db.GetConnect(ctx)
@@ -179,6 +190,7 @@ func (s *LqScheduler) refreshTasks(ctx context.Context) error {
 	return nil
 }
 
+// loadSchedules fetches all schedule records from DB.
 func loadSchedules(ctx context.Context, db *sql.DB) ([]LqSchedule, error) {
 	rows, err := db.QueryContext(
 		ctx,
@@ -204,6 +216,7 @@ func loadSchedules(ctx context.Context, db *sql.DB) ([]LqSchedule, error) {
 	return schedules, nil
 }
 
+// scanSchedule converts a DB row into LqSchedule model.
 func scanSchedule(rows *sql.Rows) (LqSchedule, error) {
 	var (
 		idRaw      string
@@ -255,6 +268,7 @@ func scanSchedule(rows *sql.Rows) (LqSchedule, error) {
 	return schedule, nil
 }
 
+// UpdateSchedule updates existing in-memory job when DB row changed.
 func (s *LqScheduler) UpdateSchedule(item gocron.Job, schedule LqSchedule) error {
 	if !schedule.IsActive {
 		err := s.scheduler.RemoveJob(item.ID())
@@ -285,6 +299,7 @@ func (s *LqScheduler) UpdateSchedule(item gocron.Job, schedule LqSchedule) error
 	return nil
 }
 
+// CreateSchedule creates a new in-memory job for active DB schedule.
 func (s *LqScheduler) CreateSchedule(schedule LqSchedule) error {
 	if !schedule.IsActive {
 		return nil
@@ -300,6 +315,7 @@ func (s *LqScheduler) CreateSchedule(schedule LqSchedule) error {
 	return nil
 }
 
+// Run enqueues a runtime task for schedule execution and updates run metadata.
 func (s *LqScheduler) Run(ctx context.Context, schedule LqSchedule) (err error) {
 	s.logger.Infof("Run Task %s", schedule.TaskName)
 	var taskID *int64
@@ -321,6 +337,7 @@ func (s *LqScheduler) Run(ctx context.Context, schedule LqSchedule) (err error) 
 	return
 }
 
+// GetJob returns currently registered job by schedule id.
 func (s *LqScheduler) GetJob(id uuid.UUID) gocron.Job {
 	for _, job := range s.scheduler.Jobs() {
 		if job.ID() == id {
@@ -330,6 +347,7 @@ func (s *LqScheduler) GetJob(id uuid.UUID) gocron.Job {
 	return nil
 }
 
+// UpdateScheduleRun persists last/next run information in DB.
 func (s *LqScheduler) UpdateScheduleRun(
 	ctx context.Context,
 	schedule LqSchedule,

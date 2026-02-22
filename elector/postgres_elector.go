@@ -6,11 +6,15 @@ import (
 	"time"
 )
 
+// PgLeaderElector is Postgres-backed implementation of distributed leadership.
 type PgLeaderElector struct {
-	db      DbConnector
+	// db provides SQL connections.
+	db DbConnector
+	// options contains election identifiers and TTL.
 	options Options
 }
 
+// NewPgLeaderElector creates Postgres lease-based leader elector.
 func NewPgLeaderElector(db DbConnector, options Options) *PgLeaderElector {
 	return &PgLeaderElector{
 		db:      db,
@@ -18,6 +22,7 @@ func NewPgLeaderElector(db DbConnector, options Options) *PgLeaderElector {
 	}
 }
 
+// IsLeader attempts to acquire/refresh leader lease and returns not leader error on failure.
 func (p *PgLeaderElector) IsLeader(ctx context.Context) error {
 	isLeader, err := p.tryBecomeLeader(ctx)
 	if err != nil {
@@ -29,10 +34,16 @@ func (p *PgLeaderElector) IsLeader(ctx context.Context) error {
 	return errors.New("not leader")
 }
 
-func (p *PgLeaderElector) GetLeaderKey() string        { return p.options.LeaderKey }
-func (p *PgLeaderElector) GetLeaderId() string         { return p.options.LeaderId }
+// GetLeaderKey returns election key.
+func (p *PgLeaderElector) GetLeaderKey() string { return p.options.LeaderKey }
+
+// GetLeaderId returns node id used for lease ownership.
+func (p *PgLeaderElector) GetLeaderId() string { return p.options.LeaderId }
+
+// GetLeaderTTL returns leader lease duration.
 func (p *PgLeaderElector) GetLeaderTTL() time.Duration { return p.options.LeaderTTL }
 
+// tryBecomeLeader performs UPSERT with guarded update to acquire leader lease.
 func (p *PgLeaderElector) tryBecomeLeader(ctx context.Context) (bool, error) {
 	db, err := p.db.GetConnect(ctx)
 	if err != nil {

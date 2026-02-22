@@ -31,22 +31,22 @@ if err != nil {
   panic(err)
 }
 
+executor := schedulor.NewLqExecutor(logger, backend, taskExec, &schedulor.LqExecutorOptions{
+  PoolingTimeout: 30 * time.Second,
+  PoolingBatch:   1,
+})
+scheduler := schedulor.NewLqScheduler(db, logger, executor, &schedulor.LqSchedulerOptions{
+  TasksRefreshEnabled: true,
+  TasksRefreshTimeout: 30 * time.Minute,
+})
+
 app := schedulor.NewFxApp(schedulor.FxAppOptions{
-  DB:           db,
-  Logger:       logger,
-  QueueBackend: backend,
-  TaskExecutor: taskExec,
-  ExecutorOptions: &schedulor.LqExecutorOptions{
-    PoolingTimeout: 30 * time.Second,
-    PoolingBatch:   1,
-  },
-  SchedulerOptions: &schedulor.LqSchedulerOptions{
-    TasksRefreshEnabled: true,
-    TasksRefreshTimeout: 30 * time.Minute,
-  },
+  Components: []schedulor.FxLifecycleComponent{executor, scheduler},
 })
 app.Run()
 ```
+
+`FxApp` больше не требует PostgreSQL по умолчанию: можно передать только нужные компоненты.
 
 ## Bash File Executor
 

@@ -53,14 +53,14 @@ func main() {
 	})
 
 	taskExec := buildTaskExecutor(cfg, sugared)
+	lqExecutor := schedulor.NewLqExecutor(sugared, backend, taskExec, settings.LqExecutorOptions)
+	lqScheduler := schedulor.NewLqScheduler(connector, sugared, lqExecutor, settings.LqSchedulerOptions)
 
 	app := schedulor.NewFxApp(schedulor.FxAppOptions{
-		DB:               connector,
-		Logger:           sugared,
-		QueueBackend:     backend,
-		TaskExecutor:     taskExec,
-		ExecutorOptions:  settings.LqExecutorOptions,
-		SchedulerOptions: settings.LqSchedulerOptions,
+		Components: []schedulor.FxLifecycleComponent{
+			lqExecutor,
+			lqScheduler,
+		},
 	})
 
 	app.Run()

@@ -81,17 +81,24 @@ app.Run()
 ```json
 {
   "tasks": {
-    "cleanup_tmp": "rm -rf /tmp/app-cache/*",
+    "cleanup_tmp": "rm -rf /tmp/app-cache",
     "sync_reports": "/app/scripts/sync_reports.sh"
   },
   "list": [
     {
       "task_name": "health_ping",
       "command": "curl -fsS http://localhost:8080/health"
+    },
+    {
+      "task_name": "health_ping_args",
+      "args": ["curl", "-fsS", "http://localhost:8080/health"]
     }
   ]
 }
 ```
+
+Команды теперь выполняются напрямую (без `bash -lc`), как `binary + args`.
+Shell-пайпы, редиректы и glob-расширения не поддерживаются.
 
 Для in-process выполнения используй:
 `NewCodeTaskExecutor([]TaskHandler{...})`.

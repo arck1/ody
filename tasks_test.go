@@ -67,7 +67,7 @@ func TestBashTaskExecutorValidation(t *testing.T) {
 
 	payloadBadType, _ := queue.NewJSONPayload(map[string]any{"command": 42})
 	err = exec.Execute(context.Background(), queue.Claimed{TaskID: 1, TaskName: "bash", Payload: payloadBadType})
-	if err == nil || !strings.Contains(err.Error(), "must be non-empty string") {
+	if err == nil || !strings.Contains(err.Error(), "must be string or array of strings") {
 		t.Fatalf("unexpected error for bad command type: %v", err)
 	}
 }

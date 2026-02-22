@@ -60,8 +60,15 @@ func TestBashPayloadTaskExecutor(t *testing.T) {
 	}
 
 	err = exec.Execute(context.Background(), claimedWithPayload(t, "bash", map[string]any{"command": 123}))
-	if err == nil || !strings.Contains(err.Error(), "must be non-empty string") {
+	if err == nil || !strings.Contains(err.Error(), "must be string or array of strings") {
 		t.Fatalf("unexpected bad command type error: %v", err)
+	}
+
+	if err := exec.Execute(
+		context.Background(),
+		claimedWithPayload(t, "bash", map[string]any{"command": []any{"echo", "ok"}}),
+	); err != nil {
+		t.Fatalf("unexpected array command error: %v", err)
 	}
 }
 

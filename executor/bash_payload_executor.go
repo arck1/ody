@@ -3,7 +3,6 @@ package executor
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"schedulor/queue"
 )
 
@@ -35,14 +34,13 @@ func (e *BashPayloadTaskExecutor) Execute(ctx context.Context, task queue.Claime
 	if !ok {
 		return fmt.Errorf("payload field %q is required for bash executor", e.commandField)
 	}
-	command, ok := commandRaw.(string)
-	if !ok || command == "" {
-		return fmt.Errorf("payload field %q must be non-empty string", e.commandField)
-	}
-	cmd := exec.CommandContext(ctx, "bash", "-lc", command)
-	output, err := cmd.CombinedOutput()
+	args, err := parseCommandValue(commandRaw, e.commandField)
 	if err != nil {
-		return fmt.Errorf("bash command failed: %w, output=%s", err, string(output))
+		return err
+	}
+	output, err := runCommand(ctx, args)
+	if err != nil {
+		return fmt.Errorf("command failed: %w, output=%s", err, string(output))
 	}
 	return nil
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"schedulor/queue"
 
 	"github.com/samber/lo"
@@ -14,12 +13,21 @@ import (
 // BashFileTaskExecutor executes shell commands mapped by task name from config file.
 type BashFileTaskExecutor struct {
 	// commands maps task names to shell commands.
-	commands map[string]string
+	commands map[string]commandEntry
+}
+
+type commandEntry struct {
+	Command string
+	Args    []string
 }
 
 // NewBashFileTaskExecutor creates executor from provided task->command mapping.
 func NewBashFileTaskExecutor(commands map[string]string) *BashFileTaskExecutor {
-	return &BashFileTaskExecutor{commands: commands}
+	entries := make(map[string]commandEntry, len(commands))
+	for taskName, command := range commands {
+		entries[taskName] = commandEntry{Command: command}
+	}
+	return &BashFileTaskExecutor{commands: entries}
 }
 
 // NewBashFileTaskExecutorFromFile loads executor command mapping from JSON file.
@@ -28,7 +36,7 @@ func NewBashFileTaskExecutorFromFile(path string) (*BashFileTaskExecutor, error)
 	if err != nil {
 		return nil, err
 	}
-	return NewBashFileTaskExecutor(commands), nil
+	return &BashFileTaskExecutor{commands: commands}, nil
 }
 
 // TaskNames returns task names available in loaded command mapping.
@@ -40,10 +48,17 @@ func (e *BashFileTaskExecutor) Execute(ctx context.Context, task queue.Claimed) 
 	if !ok {
 		return &UnknownTaskName{TaskId: task.TaskID, TaskName: task.TaskName}
 	}
-	cmd := exec.CommandContext(ctx, "bash", "-lc", command)
-	output, err := cmd.CombinedOutput()
+	args := command.Args
+	var err error
+	if len(args) == 0 {
+		args, err = parseCommandString(command.Command)
+		if err != nil {
+			return fmt.Errorf("invalid configured command for task %q", task.TaskName)
+		}
+	}
+	output, err := runCommand(ctx, args)
 	if err != nil {
-		return fmt.Errorf("bash command failed for task %q: %w, output=%s", task.TaskName, err, string(output))
+		return fmt.Errorf("command failed for task %q: %w, output=%s", task.TaskName, err, string(output))
 	}
 	return nil
 }
@@ -53,13 +68,14 @@ type bashCommandsConfig struct {
 	Tasks map[string]string `json:"tasks"`
 	// List is verbose list representation of commands.
 	List []struct {
-		TaskName string `json:"task_name"`
-		Command  string `json:"command"`
+		TaskName string   `json:"task_name"`
+		Command  string   `json:"command"`
+		Args     []string `json:"args"`
 	} `json:"list"`
 }
 
 // loadBashCommands parses JSON config and returns normalized command map.
-func loadBashCommands(path string) (map[string]string, error) {
+func loadBashCommands(path string) (map[string]commandEntry, error) {
 	if path == "" {
 		return nil, fmt.Errorf("bash commands file path is empty")
 	}
@@ -71,18 +87,24 @@ func loadBashCommands(path string) (map[string]string, error) {
 	if err = json.Unmarshal(raw, &cfg); err != nil {
 		return nil, fmt.Errorf("parse bash commands file: %w", err)
 	}
-	commands := make(map[string]string, len(cfg.Tasks)+len(cfg.List))
+	commands := make(map[string]commandEntry, len(cfg.Tasks)+len(cfg.List))
 	for taskName, command := range cfg.Tasks {
 		if taskName == "" || command == "" {
 			continue
 		}
-		commands[taskName] = command
+		commands[taskName] = commandEntry{Command: command}
 	}
 	for _, item := range cfg.List {
-		if item.TaskName == "" || item.Command == "" {
+		if item.TaskName == "" {
 			continue
 		}
-		commands[item.TaskName] = item.Command
+		if len(item.Args) > 0 {
+			commands[item.TaskName] = commandEntry{Args: item.Args}
+			continue
+		}
+		if item.Command != "" {
+			commands[item.TaskName] = commandEntry{Command: item.Command}
+		}
 	}
 	if len(commands) == 0 {
 		return nil, fmt.Errorf("bash commands file contains no runnable tasks")

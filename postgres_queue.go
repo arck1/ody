@@ -222,7 +222,7 @@ func (q *PostgresQueue) MoveToDLQ(ctx context.Context, taskId int64) (bool, erro
 	}
 	err = db.Transaction(func(tx *gorm.DB) error {
 		result := gorm.WithResult()
-		err = gorm.G[any](db, result).Exec(
+		err = gorm.G[any](tx, result).Exec(
 			ctx,
 			`INSERT INTO lq_tasks_dlq SELECT * FROM lq_tasks WHERE task_id = ? AND attempts >= max_attempts`,
 			taskId,
@@ -233,7 +233,7 @@ func (q *PostgresQueue) MoveToDLQ(ctx context.Context, taskId int64) (bool, erro
 		if result.RowsAffected < 1 {
 			return nil
 		}
-		return gorm.G[any](db).Exec(
+		return gorm.G[any](tx).Exec(
 			ctx,
 			`DELETE FROM lq_tasks WHERE task_id = ?`,
 			taskId,

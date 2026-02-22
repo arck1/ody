@@ -3,7 +3,8 @@ package schedulor
 import (
 	"context"
 	"errors"
-	"log"
+	"fmt"
+	"runtime/debug"
 	"time"
 
 	"github.com/samber/lo"
@@ -74,7 +75,7 @@ func (e *LqExecutor) Run(ctx context.Context) {
 
 		claimed, err := e.queue.Claim(ctx, tasksNames, e.options.PoolingBatch)
 		if err != nil {
-			log.Printf("claim error: %v", err)
+			e.logger.Warnw("claim error", "err", err)
 			time.Sleep(e.options.PoolingTimeout)
 			continue
 		}
@@ -129,8 +130,14 @@ func (e *LqExecutor) processTask(ctx context.Context, task Claimed) (err error) 
 	} else {
 		defer func() {
 			if panicErr := recover(); panicErr != nil {
-				e.logger.Errorf("Exception: %v\n", err)
-				err = errors.New(panicErr.(string))
+				e.logger.Errorw(
+					"task handler panic",
+					"task_id", task.TaskID,
+					"task_name", task.TaskName,
+					"panic", panicErr,
+					"stack", string(debug.Stack()),
+				)
+				err = fmt.Errorf("task handler panic: %v", panicErr)
 			}
 		}()
 

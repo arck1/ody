@@ -1,38 +1,42 @@
 package schedulor
 
 import (
-	"os"
-	"path/filepath"
+	"context"
 	"testing"
 )
 
-func TestNewLqExecutorBashFileMode(t *testing.T) {
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "commands.json")
-	if err := os.WriteFile(configPath, []byte(`{"tasks":{"bash_task":"echo ok"}}`), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
+func TestNewLqExecutorUsesProvidedInterfaces(t *testing.T) {
+	strategy := NewCodeTaskExecutor([]TaskHandler{{
+		TaskName: "ok",
+		Handler: func(ctx context.Context, payload map[string]interface{}) error {
+			return nil
+		},
+	}})
+	backend := &testQueueBackend{}
+	exec := NewLqExecutor(testLogger(), backend, strategy, &LqExecutorOptions{PoolingTimeout: 10, PoolingBatch: 1})
 
-	exec := NewLqExecutor(nil, testLogger(), nil, &LqExecutorOptions{
-		PoolingTimeout:   10,
-		PoolingBatch:     1,
-		ExecutorMode:     "bash_file",
-		BashCommandsFile: configPath,
-	})
-	if _, ok := exec.exec.(*BashFileTaskExecutor); !ok {
-		t.Fatalf("expected BashFileTaskExecutor, got %T", exec.exec)
+	if exec.queue != backend {
+		t.Fatalf("expected provided backend to be used")
+	}
+	if exec.exec != strategy {
+		t.Fatalf("expected provided strategy to be used")
 	}
 }
 
-func TestNewLqExecutorUnknownModePanics(t *testing.T) {
+func TestNewLqExecutorPanicsOnNilBackend(t *testing.T) {
 	defer func() {
 		if recover() == nil {
-			t.Fatalf("expected panic for unknown mode")
+			t.Fatalf("expected panic for nil backend")
 		}
 	}()
-	_ = NewLqExecutor(nil, testLogger(), nil, &LqExecutorOptions{
-		PoolingTimeout: 10,
-		PoolingBatch:   1,
-		ExecutorMode:   "unknown",
-	})
+	_ = NewLqExecutor(testLogger(), nil, NewCodeTaskExecutor(nil), &LqExecutorOptions{PoolingTimeout: 10, PoolingBatch: 1})
+}
+
+func TestNewLqExecutorPanicsOnNilExecutor(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatalf("expected panic for nil executor")
+		}
+	}()
+	_ = NewLqExecutor(testLogger(), &testQueueBackend{}, nil, &LqExecutorOptions{PoolingTimeout: 10, PoolingBatch: 1})
 }

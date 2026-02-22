@@ -112,8 +112,7 @@ func TestExecutorWithPostgresQueueIntegration(t *testing.T) {
 	})
 
 	var handled atomic.Int32
-	exec := NewLqExecutorWith(
-		sqlConnector{db: db},
+	exec := NewLqExecutor(
 		testLogger(),
 		q,
 		NewCodeTaskExecutor([]TaskHandler{{

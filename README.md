@@ -2,12 +2,14 @@
 
 ## Bash File Executor
 
-`LqExecutor` поддерживает режим выполнения задач через bash-команды из JSON-файла.
+`LqExecutor` собирается из интерфейсов: backend очереди + стратегия выполнения задач.
 
-Переменные окружения:
+Для запуска задач через bash-команды из JSON-файла:
 
-- `local_queue.executor.mode=bash_file`
-- `local_queue.executor.bash_commands_file=/absolute/path/to/commands.json`
+1. Загрузи стратегию:
+`exec, err := NewBashFileTaskExecutorFromFile("/absolute/path/to/commands.json")`
+2. Передай ее в `NewLqExecutor` вместе с queue backend:
+`lq := NewLqExecutor(logger, backend, exec, options)`
 
 Пример `commands.json`:
 
@@ -26,4 +28,5 @@
 }
 ```
 
-При `mode=code` (по умолчанию) используются `TaskHandler` функции из Go-кода.
+Для in-process выполнения используй:
+`NewCodeTaskExecutor([]TaskHandler{...})`.

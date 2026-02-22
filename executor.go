@@ -16,8 +16,6 @@ import (
 type LqExecutor struct {
 	// Id is a unique executor identity used for diagnostics.
 	Id string
-	// db provides SQL connections.
-	db DbConnector
 	// logger writes executor events and errors.
 	logger *zap.SugaredLogger
 	// queue is a backend used to claim/ack/nack tasks.
@@ -28,67 +26,26 @@ type LqExecutor struct {
 	options LqExecutorOptions
 }
 
-// NewLqExecutor builds executor with default queue backend and selected execution mode.
+// NewLqExecutor builds executor from explicit interface dependencies.
 func NewLqExecutor(
-	db DbConnector,
-	logger *zap.SugaredLogger,
-	tasks []TaskHandler,
-	options *LqExecutorOptions,
-) *LqExecutor {
-	settings := GetSettings(&LqSettings{
-		LqExecutorOptions: options,
-	}).LqExecutorOptions
-	var taskExecutor TaskExecutor = NewCodeTaskExecutor(tasks)
-	switch settings.ExecutorMode {
-	case "", "code":
-	case "bash_file":
-		var err error
-		taskExecutor, err = NewBashFileTaskExecutorFromFile(settings.BashCommandsFile)
-		if err != nil {
-			panic(fmt.Errorf("init bash_file executor: %w", err))
-		}
-	default:
-		panic(fmt.Errorf("unknown executor mode %q", settings.ExecutorMode))
-	}
-	queueOptions := queue.PostgresQueueOptions{
-		TaskMaxAttempts: defaultSettings.TaskMaxAttempts,
-		TaskVisibility:  defaultSettings.TaskVisibility,
-	}
-	return NewLqExecutorWith(
-		db,
-		logger,
-		queue.NewPostgresQueue(db, &queueOptions),
-		taskExecutor,
-		settings,
-	)
-}
-
-// NewLqExecutorWith builds executor with explicitly provided queue backend and executor strategy.
-func NewLqExecutorWith(
-	db DbConnector,
 	logger *zap.SugaredLogger,
 	backend queue.QueueBackend,
 	exec TaskExecutor,
 	options *LqExecutorOptions,
 ) *LqExecutor {
-	options = GetSettings(&LqSettings{
+	settings := GetSettings(&LqSettings{
 		LqExecutorOptions: options,
 	}).LqExecutorOptions
-	if exec == nil {
-		exec = NewCodeTaskExecutor(nil)
-	}
 	if backend == nil {
-		queueOptions := queue.PostgresQueueOptions{
-			TaskMaxAttempts: defaultSettings.TaskMaxAttempts,
-			TaskVisibility:  defaultSettings.TaskVisibility,
-		}
-		backend = queue.NewPostgresQueue(db, &queueOptions)
+		panic("executor queue backend is nil")
+	}
+	if exec == nil {
+		panic("task executor strategy is nil")
 	}
 	return &LqExecutor{
 		Id:      getLeaderId(true),
-		db:      db,
 		logger:  logger,
-		options: *options,
+		options: *settings,
 		queue:   backend,
 		exec:    exec,
 	}

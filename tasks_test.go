@@ -74,7 +74,7 @@ func TestBashTaskExecutorValidation(t *testing.T) {
 
 func TestExecutorProcessTaskPanic(t *testing.T) {
 	panicExec := &panicTaskExecutor{}
-	e := NewLqExecutorWith(nil, testLogger(), nil, panicExec, &LqExecutorOptions{PoolingTimeout: 1, PoolingBatch: 1})
+	e := NewLqExecutor(testLogger(), &testQueueBackend{}, panicExec, &LqExecutorOptions{PoolingTimeout: 1, PoolingBatch: 1})
 
 	payload, _ := queue.NewJSONPayload(map[string]any{"foo": "bar"})
 	err := e.processTask(context.Background(), queue.Claimed{TaskID: 99, TaskName: "panic", Payload: payload})

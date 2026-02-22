@@ -30,6 +30,18 @@ func NewLqExecutor(
 	settings := GetSettings(&LqSettings{
 		LqExecutorOptions: options,
 	}).LqExecutorOptions
+	var taskExecutor TaskExecutor = NewCodeTaskExecutor(tasks)
+	switch settings.ExecutorMode {
+	case "", "code":
+	case "bash_file":
+		var err error
+		taskExecutor, err = NewBashFileTaskExecutorFromFile(settings.BashCommandsFile)
+		if err != nil {
+			panic(fmt.Errorf("init bash_file executor: %w", err))
+		}
+	default:
+		panic(fmt.Errorf("unknown executor mode %q", settings.ExecutorMode))
+	}
 	queueOptions := queue2.PostgresQueueOptions{
 		TaskMaxAttempts: defaultSettings.TaskMaxAttempts,
 		TaskVisibility:  defaultSettings.TaskVisibility,
@@ -38,7 +50,7 @@ func NewLqExecutor(
 		db,
 		logger,
 		queue2.NewPostgresQueue(db, &queueOptions),
-		NewCodeTaskExecutor(tasks),
+		taskExecutor,
 		settings,
 	)
 }

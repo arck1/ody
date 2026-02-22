@@ -44,6 +44,10 @@ type LqExecutorOptions struct {
 	PoolingTimeout time.Duration `env:"local_queue.executor.pooling_timeout"`
 	// Количество задач блокируемые одновременно для исполнения
 	PoolingBatch int `env:"local_queue.executor.pooling_batch"`
+	// Режим исполнения задач: code | bash_file
+	ExecutorMode string `env:"local_queue.executor.mode"`
+	// Путь к JSON-файлу с bash-командами (для режима bash_file)
+	BashCommandsFile string `env:"local_queue.executor.bash_commands_file"`
 }
 type LqSettings struct {
 	*LqPostgresQueueOptions
@@ -83,6 +87,7 @@ var defaultSettings = LqSettings{
 	LqExecutorOptions: &LqExecutorOptions{
 		PoolingTimeout: 30 * time.Second,
 		PoolingBatch:   1,
+		ExecutorMode:   "code",
 	},
 }
 
@@ -146,6 +151,9 @@ func mergeOptionsWithDefault(options *LqSettings) LqSettings {
 		}
 		if options.PoolingBatch == 0 {
 			options.PoolingBatch = defaultSettings.PoolingBatch
+		}
+		if options.ExecutorMode == "" {
+			options.ExecutorMode = defaultSettings.ExecutorMode
 		}
 	}
 	return *options

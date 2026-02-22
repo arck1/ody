@@ -3,6 +3,8 @@ package schedulor
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -78,6 +80,40 @@ func TestExecutorProcessTaskPanic(t *testing.T) {
 	err := e.processTask(context.Background(), queue2.Claimed{TaskID: 99, TaskName: "panic", Payload: payload})
 	if err == nil || !strings.Contains(err.Error(), "task handler panic") {
 		t.Fatalf("expected panic error, got: %v", err)
+	}
+}
+
+func TestBashFileTaskExecutorFromFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "commands.json")
+	content := `{"tasks":{"task_a":"echo a"},"list":[{"task_name":"task_b","command":"echo b"}]}`
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	exec, err := NewBashFileTaskExecutorFromFile(configPath)
+	if err != nil {
+		t.Fatalf("load executor: %v", err)
+	}
+	names := exec.TaskNames()
+	if len(names) != 2 {
+		t.Fatalf("expected 2 task names, got %d", len(names))
+	}
+
+	if err = exec.Execute(context.Background(), queue2.Claimed{TaskID: 1, TaskName: "task_a"}); err != nil {
+		t.Fatalf("execute task_a: %v", err)
+	}
+}
+
+func TestBashFileTaskExecutorFromFileValidation(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "commands.json")
+	if err := os.WriteFile(configPath, []byte(`{"tasks":{}}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_, err := NewBashFileTaskExecutorFromFile(configPath)
+	if err == nil || !strings.Contains(err.Error(), "contains no runnable tasks") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

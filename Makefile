@@ -39,7 +39,7 @@ test: test-unit
 test-unit:
 	go test ./...
 
-test-integration:
+test-integration: deps-test
 	go test -tags integration ./...
 
 fmt:

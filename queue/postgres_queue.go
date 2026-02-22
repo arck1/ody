@@ -1,4 +1,4 @@
-package schedulor
+package queue
 
 import (
 	"context"
@@ -12,16 +12,25 @@ import (
 
 type PostgresQueue struct {
 	db      DbConnector
-	options LqPostgresQueueOptions
+	options PostgresQueueOptions
 }
 
-func NewPostgresQueue(db DbConnector, options *LqPostgresQueueOptions) *PostgresQueue {
-	options = GetSettings(&LqSettings{
-		LqPostgresQueueOptions: options,
-	}).LqPostgresQueueOptions
+func NewPostgresQueue(db DbConnector, options *PostgresQueueOptions) *PostgresQueue {
+	resolved := PostgresQueueOptions{
+		TaskMaxAttempts: 25,
+		TaskVisibility:  60 * time.Second,
+	}
+	if options != nil {
+		if options.TaskMaxAttempts > 0 {
+			resolved.TaskMaxAttempts = options.TaskMaxAttempts
+		}
+		if options.TaskVisibility > 0 {
+			resolved.TaskVisibility = options.TaskVisibility
+		}
+	}
 	return &PostgresQueue{
 		db:      db,
-		options: *options,
+		options: resolved,
 	}
 }
 
@@ -60,17 +69,6 @@ func (q *PostgresQueue) Enqueue(
 		return nil, err
 	}
 	return &taskId, nil
-}
-
-// Claim: атомарный захват партии задач с назначением новой аренды
-type Claimed struct {
-	TaskID        int64                              `json:"task_id"        gorm:"column:task_id"`
-	TaskName      string                             `json:"task_name"      gorm:"column:task_name"`
-	Payload       datatypes.JSONType[map[string]any] `                      gorm:"column:payload;type:jsonb"`
-	LeaseToken    uuid.UUID                          `json:"lease_token"    gorm:"column:lease_token"`
-	ReservedUntil time.Time                          `json:"reserved_until" gorm:"column:reserved_until"`
-	Attempts      int                                `json:"attempts"       gorm:"column:attempts"`
-	MaxAttempts   int                                `json:"max_attempts"   gorm:"column:max_attempts"`
 }
 
 func (q *PostgresQueue) Claim(ctx context.Context, tasks []string, limit int) ([]Claimed, error) {

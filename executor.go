@@ -5,9 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"runtime/debug"
+	queue2 "schedulor/queue"
 	"time"
-
-	"github.com/samber/lo"
 
 	"go.uber.org/fx"
 	"go.uber.org/zap"
@@ -17,8 +16,8 @@ type LqExecutor struct {
 	Id      string
 	db      DbConnector
 	logger  *zap.SugaredLogger
-	queue   *PostgresQueue
-	tasks   map[string]TaskHandlerFunc
+	queue   queue2.QueueBackend
+	exec    TaskExecutor
 	options LqExecutorOptions
 }
 
@@ -28,22 +27,53 @@ func NewLqExecutor(
 	tasks []TaskHandler,
 	options *LqExecutorOptions,
 ) *LqExecutor {
+	settings := GetSettings(&LqSettings{
+		LqExecutorOptions: options,
+	}).LqExecutorOptions
+	queueOptions := queue2.PostgresQueueOptions{
+		TaskMaxAttempts: defaultSettings.TaskMaxAttempts,
+		TaskVisibility:  defaultSettings.TaskVisibility,
+	}
+	return NewLqExecutorWith(
+		db,
+		logger,
+		queue2.NewPostgresQueue(db, &queueOptions),
+		NewCodeTaskExecutor(tasks),
+		settings,
+	)
+}
+
+func NewLqExecutorWith(
+	db DbConnector,
+	logger *zap.SugaredLogger,
+	backend queue2.QueueBackend,
+	exec TaskExecutor,
+	options *LqExecutorOptions,
+) *LqExecutor {
 	options = GetSettings(&LqSettings{
 		LqExecutorOptions: options,
 	}).LqExecutorOptions
+	if exec == nil {
+		exec = NewCodeTaskExecutor(nil)
+	}
+	if backend == nil {
+		queueOptions := queue2.PostgresQueueOptions{
+			TaskMaxAttempts: defaultSettings.TaskMaxAttempts,
+			TaskVisibility:  defaultSettings.TaskVisibility,
+		}
+		backend = queue2.NewPostgresQueue(db, &queueOptions)
+	}
 	return &LqExecutor{
 		Id:      getLeaderId(true),
 		db:      db,
 		logger:  logger,
 		options: *options,
-		queue:   NewPostgresQueue(db, nil),
-		tasks: lo.Associate(tasks, func(item TaskHandler) (string, TaskHandlerFunc) {
-			return item.TaskName, item.Handler
-		}),
+		queue:   backend,
+		exec:    exec,
 	}
 }
 
-func (e *LqExecutor) GetQueue() TasksQueue {
+func (e *LqExecutor) GetQueue() queue2.TasksQueue {
 	return e.queue
 }
 func (e *LqExecutor) GetOptions() LqExecutorOptions { return e.options }
@@ -63,7 +93,11 @@ func (e *LqExecutor) Init(lifecycle fx.Lifecycle) {
 }
 
 func (e *LqExecutor) Run(ctx context.Context) {
-	tasksNames := lo.Keys(e.tasks)
+	tasksNames := e.exec.TaskNames()
+	if len(tasksNames) == 0 {
+		e.logger.Warn("executor has no task names to process")
+		return
+	}
 	var unknownTaskError *UnknownTaskName
 
 	for {
@@ -121,26 +155,18 @@ func (e *LqExecutor) Run(ctx context.Context) {
 	}
 }
 
-func (e *LqExecutor) processTask(ctx context.Context, task Claimed) (err error) {
-	if handler, ok := e.tasks[task.TaskName]; !ok {
-		return &UnknownTaskName{
-			TaskId:   task.TaskID,
-			TaskName: task.TaskName,
+func (e *LqExecutor) processTask(ctx context.Context, task queue2.Claimed) (err error) {
+	defer func() {
+		if panicErr := recover(); panicErr != nil {
+			e.logger.Errorw(
+				"task handler panic",
+				"task_id", task.TaskID,
+				"task_name", task.TaskName,
+				"panic", panicErr,
+				"stack", string(debug.Stack()),
+			)
+			err = fmt.Errorf("task handler panic: %v", panicErr)
 		}
-	} else {
-		defer func() {
-			if panicErr := recover(); panicErr != nil {
-				e.logger.Errorw(
-					"task handler panic",
-					"task_id", task.TaskID,
-					"task_name", task.TaskName,
-					"panic", panicErr,
-					"stack", string(debug.Stack()),
-				)
-				err = fmt.Errorf("task handler panic: %v", panicErr)
-			}
-		}()
-
-		return handler(ctx, task.Payload.Data())
-	}
+	}()
+	return e.exec.Execute(ctx, task)
 }

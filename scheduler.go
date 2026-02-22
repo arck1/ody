@@ -2,6 +2,8 @@ package schedulor
 
 import (
 	"context"
+	"schedulor/elector"
+	queue2 "schedulor/queue"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,7 +27,7 @@ type LqScheduler struct {
 	// localScheduler Запускает задачи на каждом инстансе вне зависимости от лидерства
 	localScheduler gocron.Scheduler
 	// queue Очередь для постановки задач на выполнение
-	queue TasksQueue
+	queue queue2.TasksQueue
 	// settings Настройки
 	options LqSchedulerOptions
 }
@@ -47,8 +49,16 @@ func NewLqScheduler(
 	if err != nil {
 		panic(err)
 	}
+	leaderElector := settings.LqSchedulerOptions.LeaderElector
+	if leaderElector == nil {
+		leaderElector = elector.NewPgLeaderElector(db, elector.Options{
+			LeaderKey: settings.LeaderKey,
+			LeaderId:  settings.LeaderId,
+			LeaderTTL: settings.LeaderTTL,
+		})
+	}
 	scheduler, err := gocron.NewScheduler(
-		gocron.WithDistributedElector(NewPgLeaderElector(db, *settings.LqLeaderElectorOptions)),
+		gocron.WithDistributedElector(leaderElector),
 		gocron.WithLogger(LqLogger{logger}),
 		gocron.WithLocation(time.Local),
 	)

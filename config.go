@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"schedulor/elector"
 	"time"
 
 	"github.com/caarlos0/env/v11"
@@ -23,6 +24,8 @@ type LqSchedulerOptions struct {
 	TasksRefreshEnabled bool `env:"local_queue.scheduler.tasks_refresh_enabled"`
 	// TasksRefreshTimeout Таймаут обновления задач из базы данных, если включен TasksRefreshEnabled
 	TasksRefreshTimeout time.Duration `env:"local_queue.scheduler.tasks_refresh_timeout"`
+	// LeaderElector Опциональный кастомный elector для алгоритма выбора лидера
+	LeaderElector elector.LeaderElector `env:"-"`
 }
 
 type LqLeaderElectorOptions struct {

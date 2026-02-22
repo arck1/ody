@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	queue2 "schedulor/queue"
+	"schedulor/queue"
 
 	"github.com/samber/lo"
 )
@@ -35,7 +35,7 @@ func NewBashFileTaskExecutorFromFile(path string) (*BashFileTaskExecutor, error)
 func (e *BashFileTaskExecutor) TaskNames() []string { return lo.Keys(e.commands) }
 
 // Execute runs preconfigured bash command for claimed task name.
-func (e *BashFileTaskExecutor) Execute(ctx context.Context, task queue2.Claimed) error {
+func (e *BashFileTaskExecutor) Execute(ctx context.Context, task queue.Claimed) error {
 	command, ok := e.commands[task.TaskName]
 	if !ok {
 		return &UnknownTaskName{TaskId: task.TaskID, TaskName: task.TaskName}

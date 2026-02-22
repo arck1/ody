@@ -2,7 +2,7 @@ package schedulor
 
 import (
 	"encoding/json"
-	queue2 "schedulor/queue"
+	"schedulor/queue"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,7 +34,7 @@ type LqSchedule struct {
 	// Cron stores cron expression.
 	Cron string `json:"cron"`
 	// Payload is JSON payload enqueued on run.
-	Payload queue2.JSONPayload `json:"payload"`
+	Payload queue.JSONPayload `json:"payload"`
 	// IsActive controls whether schedule should run.
 	IsActive bool `json:"is_active"`
 	// NextRun is projected next run timestamp.

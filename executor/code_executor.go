@@ -2,7 +2,7 @@ package executor
 
 import (
 	"context"
-	queue2 "schedulor/queue"
+	"schedulor/queue"
 
 	"github.com/samber/lo"
 )
@@ -28,7 +28,7 @@ func (e *CodeTaskExecutor) TaskNames() []string {
 }
 
 // Execute runs mapped Go handler for claimed task.
-func (e *CodeTaskExecutor) Execute(ctx context.Context, task queue2.Claimed) error {
+func (e *CodeTaskExecutor) Execute(ctx context.Context, task queue.Claimed) error {
 	handler, ok := e.tasks[task.TaskName]
 	if !ok {
 		return &UnknownTaskName{

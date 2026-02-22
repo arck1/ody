@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime/debug"
-	queue2 "schedulor/queue"
+	"schedulor/queue"
 	"time"
 
 	"go.uber.org/fx"
@@ -21,7 +21,7 @@ type LqExecutor struct {
 	// logger writes executor events and errors.
 	logger *zap.SugaredLogger
 	// queue is a backend used to claim/ack/nack tasks.
-	queue queue2.QueueBackend
+	queue queue.QueueBackend
 	// exec performs actual task business logic.
 	exec TaskExecutor
 	// options controls polling and batching behavior.
@@ -50,14 +50,14 @@ func NewLqExecutor(
 	default:
 		panic(fmt.Errorf("unknown executor mode %q", settings.ExecutorMode))
 	}
-	queueOptions := queue2.PostgresQueueOptions{
+	queueOptions := queue.PostgresQueueOptions{
 		TaskMaxAttempts: defaultSettings.TaskMaxAttempts,
 		TaskVisibility:  defaultSettings.TaskVisibility,
 	}
 	return NewLqExecutorWith(
 		db,
 		logger,
-		queue2.NewPostgresQueue(db, &queueOptions),
+		queue.NewPostgresQueue(db, &queueOptions),
 		taskExecutor,
 		settings,
 	)
@@ -67,7 +67,7 @@ func NewLqExecutor(
 func NewLqExecutorWith(
 	db DbConnector,
 	logger *zap.SugaredLogger,
-	backend queue2.QueueBackend,
+	backend queue.QueueBackend,
 	exec TaskExecutor,
 	options *LqExecutorOptions,
 ) *LqExecutor {
@@ -78,11 +78,11 @@ func NewLqExecutorWith(
 		exec = NewCodeTaskExecutor(nil)
 	}
 	if backend == nil {
-		queueOptions := queue2.PostgresQueueOptions{
+		queueOptions := queue.PostgresQueueOptions{
 			TaskMaxAttempts: defaultSettings.TaskMaxAttempts,
 			TaskVisibility:  defaultSettings.TaskVisibility,
 		}
-		backend = queue2.NewPostgresQueue(db, &queueOptions)
+		backend = queue.NewPostgresQueue(db, &queueOptions)
 	}
 	return &LqExecutor{
 		Id:      getLeaderId(true),
@@ -95,7 +95,7 @@ func NewLqExecutorWith(
 }
 
 // GetQueue returns queue producer interface used by scheduler to enqueue tasks.
-func (e *LqExecutor) GetQueue() queue2.TasksQueue {
+func (e *LqExecutor) GetQueue() queue.TasksQueue {
 	return e.queue
 }
 
@@ -182,7 +182,7 @@ func (e *LqExecutor) Run(ctx context.Context) {
 }
 
 // processTask executes a single task and converts panics to errors.
-func (e *LqExecutor) processTask(ctx context.Context, task queue2.Claimed) (err error) {
+func (e *LqExecutor) processTask(ctx context.Context, task queue.Claimed) (err error) {
 	defer func() {
 		if panicErr := recover(); panicErr != nil {
 			e.logger.Errorw(

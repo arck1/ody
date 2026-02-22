@@ -3,7 +3,7 @@ package executor
 import (
 	"context"
 	"fmt"
-	queue2 "schedulor/queue"
+	"schedulor/queue"
 )
 
 // TaskHandlerFunc processes task payload decoded from queue JSON.
@@ -22,7 +22,7 @@ type TaskExecutor interface {
 	// TaskNames returns list of queue task names processed by executor.
 	TaskNames() []string
 	// Execute processes a single claimed task.
-	Execute(ctx context.Context, task queue2.Claimed) error
+	Execute(ctx context.Context, task queue.Claimed) error
 }
 
 // UnknownTaskName is returned when task name has no registered handler/command.

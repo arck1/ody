@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	queue2 "schedulor/queue"
+	"schedulor/queue"
 )
 
 func TestCodeTaskExecutorExecute(t *testing.T) {
@@ -24,20 +24,20 @@ func TestCodeTaskExecutorExecute(t *testing.T) {
 		},
 	})
 
-	payload, err := queue2.NewJSONPayload(map[string]any{"foo": "bar"})
+	payload, err := queue.NewJSONPayload(map[string]any{"foo": "bar"})
 	if err != nil {
 		t.Fatalf("payload: %v", err)
 	}
 
-	if err = exec.Execute(context.Background(), queue2.Claimed{TaskID: 1, TaskName: "ok", Payload: payload}); err != nil {
+	if err = exec.Execute(context.Background(), queue.Claimed{TaskID: 1, TaskName: "ok", Payload: payload}); err != nil {
 		t.Fatalf("execute error: %v", err)
 	}
 }
 
 func TestCodeTaskExecutorUnknownTask(t *testing.T) {
 	exec := NewCodeTaskExecutor(nil)
-	payload, _ := queue2.NewJSONPayload(map[string]any{"foo": "bar"})
-	err := exec.Execute(context.Background(), queue2.Claimed{TaskID: 77, TaskName: "missing", Payload: payload})
+	payload, _ := queue.NewJSONPayload(map[string]any{"foo": "bar"})
+	err := exec.Execute(context.Background(), queue.Claimed{TaskID: 77, TaskName: "missing", Payload: payload})
 	var unknown *UnknownTaskName
 	if !errors.As(err, &unknown) {
 		t.Fatalf("expected UnknownTaskName, got: %v", err)
@@ -46,12 +46,12 @@ func TestCodeTaskExecutorUnknownTask(t *testing.T) {
 
 func TestBashTaskExecutorExecute(t *testing.T) {
 	exec := NewBashTaskExecutor([]string{"bash"}, "command")
-	payload, err := queue2.NewJSONPayload(map[string]any{"command": "echo ok"})
+	payload, err := queue.NewJSONPayload(map[string]any{"command": "echo ok"})
 	if err != nil {
 		t.Fatalf("payload: %v", err)
 	}
 
-	if err = exec.Execute(context.Background(), queue2.Claimed{TaskID: 1, TaskName: "bash", Payload: payload}); err != nil {
+	if err = exec.Execute(context.Background(), queue.Claimed{TaskID: 1, TaskName: "bash", Payload: payload}); err != nil {
 		t.Fatalf("execute error: %v", err)
 	}
 }
@@ -59,14 +59,14 @@ func TestBashTaskExecutorExecute(t *testing.T) {
 func TestBashTaskExecutorValidation(t *testing.T) {
 	exec := NewBashTaskExecutor(nil, "")
 
-	payloadMissing, _ := queue2.NewJSONPayload(map[string]any{"x": "echo ok"})
-	err := exec.Execute(context.Background(), queue2.Claimed{TaskID: 1, TaskName: "bash", Payload: payloadMissing})
+	payloadMissing, _ := queue.NewJSONPayload(map[string]any{"x": "echo ok"})
+	err := exec.Execute(context.Background(), queue.Claimed{TaskID: 1, TaskName: "bash", Payload: payloadMissing})
 	if err == nil || !strings.Contains(err.Error(), "payload field \"command\" is required") {
 		t.Fatalf("unexpected error for missing command: %v", err)
 	}
 
-	payloadBadType, _ := queue2.NewJSONPayload(map[string]any{"command": 42})
-	err = exec.Execute(context.Background(), queue2.Claimed{TaskID: 1, TaskName: "bash", Payload: payloadBadType})
+	payloadBadType, _ := queue.NewJSONPayload(map[string]any{"command": 42})
+	err = exec.Execute(context.Background(), queue.Claimed{TaskID: 1, TaskName: "bash", Payload: payloadBadType})
 	if err == nil || !strings.Contains(err.Error(), "must be non-empty string") {
 		t.Fatalf("unexpected error for bad command type: %v", err)
 	}
@@ -76,8 +76,8 @@ func TestExecutorProcessTaskPanic(t *testing.T) {
 	panicExec := &panicTaskExecutor{}
 	e := NewLqExecutorWith(nil, testLogger(), nil, panicExec, &LqExecutorOptions{PoolingTimeout: 1, PoolingBatch: 1})
 
-	payload, _ := queue2.NewJSONPayload(map[string]any{"foo": "bar"})
-	err := e.processTask(context.Background(), queue2.Claimed{TaskID: 99, TaskName: "panic", Payload: payload})
+	payload, _ := queue.NewJSONPayload(map[string]any{"foo": "bar"})
+	err := e.processTask(context.Background(), queue.Claimed{TaskID: 99, TaskName: "panic", Payload: payload})
 	if err == nil || !strings.Contains(err.Error(), "task handler panic") {
 		t.Fatalf("expected panic error, got: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestBashFileTaskExecutorFromFile(t *testing.T) {
 		t.Fatalf("expected 2 task names, got %d", len(names))
 	}
 
-	if err = exec.Execute(context.Background(), queue2.Claimed{TaskID: 1, TaskName: "task_a"}); err != nil {
+	if err = exec.Execute(context.Background(), queue.Claimed{TaskID: 1, TaskName: "task_a"}); err != nil {
 		t.Fatalf("execute task_a: %v", err)
 	}
 }
@@ -121,6 +121,6 @@ type panicTaskExecutor struct{}
 
 func (p *panicTaskExecutor) TaskNames() []string { return []string{"panic"} }
 
-func (p *panicTaskExecutor) Execute(ctx context.Context, task queue2.Claimed) error {
+func (p *panicTaskExecutor) Execute(ctx context.Context, task queue.Claimed) error {
 	panic("boom")
 }

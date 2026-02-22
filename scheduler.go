@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"schedulor/elector"
-	queue2 "schedulor/queue"
+	"schedulor/queue"
 	"time"
 
 	"github.com/google/uuid"
@@ -33,7 +33,7 @@ type LqScheduler struct {
 	// localScheduler runs jobs on every instance regardless of leadership.
 	localScheduler gocron.Scheduler
 	// queue is used to enqueue executable tasks.
-	queue queue2.TasksQueue
+	queue queue.TasksQueue
 	// options stores resolved scheduler options.
 	options LqSchedulerOptions
 }
@@ -247,7 +247,7 @@ func scanSchedule(rows *sql.Rows) (LqSchedule, error) {
 		return LqSchedule{}, fmt.Errorf("invalid schedule id %q: %w", idRaw, err)
 	}
 	schedule.Id = id
-	schedule.Payload = queue2.JSONPayload(payloadRaw)
+	schedule.Payload = queue.JSONPayload(payloadRaw)
 	if nextRunRaw.Valid {
 		nextRun := nextRunRaw.Time
 		schedule.NextRun = &nextRun

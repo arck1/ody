@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"schedulor/elector"
-	queue2 "schedulor/queue"
+	"schedulor/queue"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/testcontainers/testcontainers-go"
@@ -34,13 +34,13 @@ func TestPostgresQueueLifecycleIntegration(t *testing.T) {
 	t.Parallel()
 
 	db := setupIntegrationDB(t)
-	q := queue2.NewPostgresQueue(sqlConnector{db: db}, &queue2.PostgresQueueOptions{
+	q := queue.NewPostgresQueue(sqlConnector{db: db}, &queue.PostgresQueueOptions{
 		TaskMaxAttempts: 2,
 		TaskVisibility:  500 * time.Millisecond,
 	})
 
 	ctx := context.Background()
-	payload, err := queue2.NewJSONPayload(map[string]any{"kind": "email", "to": "a@b.c"})
+	payload, err := queue.NewJSONPayload(map[string]any{"kind": "email", "to": "a@b.c"})
 	if err != nil {
 		t.Fatalf("payload error: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestExecutorWithPostgresQueueIntegration(t *testing.T) {
 	t.Parallel()
 
 	db := setupIntegrationDB(t)
-	q := queue2.NewPostgresQueue(sqlConnector{db: db}, &queue2.PostgresQueueOptions{
+	q := queue.NewPostgresQueue(sqlConnector{db: db}, &queue.PostgresQueueOptions{
 		TaskMaxAttempts: 3,
 		TaskVisibility:  500 * time.Millisecond,
 	})
@@ -126,7 +126,7 @@ func TestExecutorWithPostgresQueueIntegration(t *testing.T) {
 		&LqExecutorOptions{PoolingTimeout: 10 * time.Millisecond, PoolingBatch: 1},
 	)
 
-	payload, err := queue2.NewJSONPayload(map[string]any{"x": 1})
+	payload, err := queue.NewJSONPayload(map[string]any{"x": 1})
 	if err != nil {
 		t.Fatalf("payload error: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestPgLeaderElectorIntegration(t *testing.T) {
 	}
 }
 
-func eventuallyClaimOne(t *testing.T, q *queue2.PostgresQueue, tasks []string, timeout time.Duration) queue2.Claimed {
+func eventuallyClaimOne(t *testing.T, q *queue.PostgresQueue, tasks []string, timeout time.Duration) queue.Claimed {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -202,7 +202,7 @@ func eventuallyClaimOne(t *testing.T, q *queue2.PostgresQueue, tasks []string, t
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("timeout waiting for claim")
-	return queue2.Claimed{}
+	return queue.Claimed{}
 }
 
 func setupIntegrationDB(t *testing.T) *sql.DB {

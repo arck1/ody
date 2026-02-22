@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	queue2 "schedulor/queue"
+	"schedulor/queue"
 )
 
 func TestUnknownTaskNameError(t *testing.T) {
@@ -117,11 +117,11 @@ func TestBashFileTaskExecutorFromFileValidation(t *testing.T) {
 	}
 }
 
-func claimedWithPayload(t *testing.T, taskName string, payload map[string]any) queue2.Claimed {
+func claimedWithPayload(t *testing.T, taskName string, payload map[string]any) queue.Claimed {
 	t.Helper()
-	p, err := queue2.NewJSONPayload(payload)
+	p, err := queue.NewJSONPayload(payload)
 	if err != nil {
 		t.Fatalf("payload marshal error: %v", err)
 	}
-	return queue2.Claimed{TaskID: 1, TaskName: taskName, Payload: p}
+	return queue.Claimed{TaskID: 1, TaskName: taskName, Payload: p}
 }

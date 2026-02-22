@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-	queue2 "schedulor/queue"
+	"schedulor/queue"
 )
 
 // BashPayloadTaskExecutor executes shell commands from task payload fields.
@@ -30,7 +30,7 @@ func NewBashPayloadTaskExecutor(taskNames []string, commandField string) *BashPa
 func (e *BashPayloadTaskExecutor) TaskNames() []string { return e.taskNames }
 
 // Execute runs bash command from payload field.
-func (e *BashPayloadTaskExecutor) Execute(ctx context.Context, task queue2.Claimed) error {
+func (e *BashPayloadTaskExecutor) Execute(ctx context.Context, task queue.Claimed) error {
 	commandRaw, ok := task.Payload.Data()[e.commandField]
 	if !ok {
 		return fmt.Errorf("payload field %q is required for bash executor", e.commandField)

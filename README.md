@@ -1,5 +1,22 @@
 # schedulor
 
+## CLI
+
+Запуск через CLI:
+
+```bash
+SCHEDULOR_DB_DSN='postgres://schedulor:schedulor@localhost:5432/schedulor?sslmode=disable' \
+SCHEDULOR_BASH_COMMANDS_FILE='/absolute/path/to/commands.json' \
+go run ./cmd/schedulor
+```
+
+Параметры CLI:
+
+- `--db-dsn` или `SCHEDULOR_DB_DSN`
+- `--executor` или `SCHEDULOR_EXECUTOR` (сейчас поддерживается только `bash_file`)
+- `--bash-commands-file` или `SCHEDULOR_BASH_COMMANDS_FILE`
+- `--log-level` или `SCHEDULOR_LOG_LEVEL` (`debug|info|warn|error`)
+
 ## Fx Entry Point
 
 Для запуска через `fx` используй `NewFxApp(...)`:

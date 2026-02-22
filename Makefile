@@ -1,7 +1,7 @@
 SHELL := /bin/sh
 COMPOSE := docker compose
 
-.PHONY: help deps-test up down restart logs ps test test-unit test-integration fmt tidy
+.PHONY: help deps-test up down restart logs ps test test-unit test-integration run-cli fmt tidy
 
 help:
 	@echo "Targets:"
@@ -14,6 +14,7 @@ help:
 	@echo "  test              Run unit tests"
 	@echo "  test-unit         Run unit tests"
 	@echo "  test-integration  Run integration tests (requires Docker)"
+	@echo "  run-cli           Run schedulor CLI"
 	@echo "  fmt               Run gofmt on all Go files"
 	@echo "  tidy              Run go mod tidy"
 
@@ -41,6 +42,9 @@ test-unit:
 
 test-integration: deps-test
 	go test -tags integration ./...
+
+run-cli:
+	go run ./cmd/schedulor
 
 fmt:
 	gofmt -w $$(find . -name '*.go' -type f)

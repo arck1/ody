@@ -3,8 +3,6 @@ package executor
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -44,8 +42,8 @@ func TestCodeTaskExecutor(t *testing.T) {
 	}
 }
 
-func TestBashPayloadTaskExecutor(t *testing.T) {
-	exec := NewBashPayloadTaskExecutor(nil, "")
+func TestBashTaskExecutorFromPayload(t *testing.T) {
+	exec := NewBashTaskExecutor(nil, "")
 	if len(exec.TaskNames()) != 1 || exec.TaskNames()[0] != "bash" {
 		t.Fatalf("unexpected default task names: %+v", exec.TaskNames())
 	}
@@ -72,55 +70,32 @@ func TestBashPayloadTaskExecutor(t *testing.T) {
 	}
 }
 
-func TestBashFileTaskExecutorFromFile(t *testing.T) {
-	tmpDir := t.TempDir()
-	cfg := filepath.Join(tmpDir, "commands.json")
-	if err := os.WriteFile(cfg, []byte(`{"tasks":{"a":"echo a"},"list":[{"task_name":"b","command":"echo b"}]}`), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	exec, err := NewBashFileTaskExecutorFromFile(cfg)
-	if err != nil {
-		t.Fatalf("load executor: %v", err)
-	}
+func TestBashTaskExecutorFromCommands(t *testing.T) {
+	exec := NewBashTaskExecutorFromCommands(map[string]string{
+		"a": "echo a",
+		"b": "echo b",
+	})
 	if len(exec.TaskNames()) != 2 {
 		t.Fatalf("expected 2 task names, got %d", len(exec.TaskNames()))
 	}
 
-	if err = exec.Execute(context.Background(), claimedWithPayload(t, "a", map[string]any{})); err != nil {
+	if err := exec.Execute(context.Background(), claimedWithPayload(t, "a", map[string]any{})); err != nil {
 		t.Fatalf("execute error: %v", err)
 	}
 
-	err = exec.Execute(context.Background(), claimedWithPayload(t, "missing", map[string]any{}))
+	err := exec.Execute(context.Background(), claimedWithPayload(t, "missing", map[string]any{}))
 	var unknown *UnknownTaskName
 	if !errors.As(err, &unknown) {
 		t.Fatalf("expected UnknownTaskName, got: %v", err)
 	}
 }
 
-func TestBashFileTaskExecutorFromFileValidation(t *testing.T) {
-	_, err := NewBashFileTaskExecutorFromFile("")
-	if err == nil || !strings.Contains(err.Error(), "path is empty") {
-		t.Fatalf("unexpected empty-path error: %v", err)
-	}
-
-	tmpDir := t.TempDir()
-	badJSON := filepath.Join(tmpDir, "bad.json")
-	if err = os.WriteFile(badJSON, []byte(`{`), 0o600); err != nil {
-		t.Fatalf("write bad json: %v", err)
-	}
-	_, err = NewBashFileTaskExecutorFromFile(badJSON)
-	if err == nil || !strings.Contains(err.Error(), "parse bash commands file") {
-		t.Fatalf("unexpected parse error: %v", err)
-	}
-
-	emptyCfg := filepath.Join(tmpDir, "empty.json")
-	if err = os.WriteFile(emptyCfg, []byte(`{"tasks":{}}`), 0o600); err != nil {
-		t.Fatalf("write empty config: %v", err)
-	}
-	_, err = NewBashFileTaskExecutorFromFile(emptyCfg)
-	if err == nil || !strings.Contains(err.Error(), "contains no runnable tasks") {
-		t.Fatalf("unexpected empty config error: %v", err)
+func TestBashTaskExecutorWithCommandsArgs(t *testing.T) {
+	exec := NewBashTaskExecutorWithCommands(map[string]TaskCommand{
+		"health": {Args: []string{"echo", "ok"}},
+	})
+	if err := exec.Execute(context.Background(), claimedWithPayload(t, "health", map[string]any{})); err != nil {
+		t.Fatalf("execute error: %v", err)
 	}
 }
 

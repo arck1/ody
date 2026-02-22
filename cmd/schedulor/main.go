@@ -30,7 +30,7 @@ type cliConfig struct {
 	executorType     string
 	bashCommandsFile string
 	executorTaskNames string
-	commandField      string
+	commandField     string
 	logLevel         string
 	withScheduler    bool
 }
@@ -92,17 +92,13 @@ func parseConfig() cliConfig {
 	cfg := cliConfig{}
 	flag.StringVar(&cfg.queueBackend, "queue-backend", envOrDefault("SCHEDULOR_QUEUE_BACKEND", "postgres"), "Queue backend: postgres|redis|kafka|noop")
 	flag.StringVar(&cfg.dbDSN, "db-dsn", envOrDefault("SCHEDULOR_DB_DSN", ""), "PostgreSQL DSN (required for postgres backend)")
-	flag.StringVar(&cfg.executorType, "executor", envOrDefault("SCHEDULOR_EXECUTOR", "bash_file"), "Executor type: bash_file|bash_payload")
-	flag.StringVar(&cfg.bashCommandsFile, "bash-commands-file", envOrDefault("SCHEDULOR_BASH_COMMANDS_FILE", ""), "Path to JSON file with bash commands")
-	flag.StringVar(&cfg.executorTaskNames, "executor-task-names", envOrDefault("SCHEDULOR_EXECUTOR_TASK_NAMES", "bash"), "Comma-separated task names for bash_payload executor")
-	flag.StringVar(&cfg.commandField, "executor-command-field", envOrDefault("SCHEDULOR_EXECUTOR_COMMAND_FIELD", "command"), "Payload field with shell command for bash_payload executor")
+	flag.StringVar(&cfg.executorType, "executor", envOrDefault("SCHEDULOR_EXECUTOR", "bash"), "Executor type: bash")
+	flag.StringVar(&cfg.bashCommandsFile, "bash-commands-file", envOrDefault("SCHEDULOR_BASH_COMMANDS_FILE", ""), "Path to JSON file with task commands")
+	flag.StringVar(&cfg.executorTaskNames, "executor-task-names", envOrDefault("SCHEDULOR_EXECUTOR_TASK_NAMES", "bash"), "Comma-separated task names for payload command mode")
+	flag.StringVar(&cfg.commandField, "executor-command-field", envOrDefault("SCHEDULOR_EXECUTOR_COMMAND_FIELD", "command"), "Payload field with command for payload mode")
 	flag.StringVar(&cfg.logLevel, "log-level", envOrDefault("SCHEDULOR_LOG_LEVEL", "info"), "Logger level: debug|info|warn|error")
 	flag.BoolVar(&cfg.withScheduler, "with-scheduler", envBoolOrDefault("SCHEDULOR_WITH_SCHEDULER", true), "Run scheduler component")
 	flag.Parse()
-
-	if cfg.executorType == "bash_file" && cfg.bashCommandsFile == "" {
-		fail("SCHEDULOR_BASH_COMMANDS_FILE (or --bash-commands-file) is required")
-	}
 	return cfg
 }
 
@@ -195,13 +191,14 @@ func (postgresBackendFactory) Build(
 
 func buildTaskExecutor(cfg cliConfig, logger *zap.SugaredLogger) schedulor.TaskExecutor {
 	switch cfg.executorType {
-	case "bash_file":
-		taskExec, err := schedulor.NewBashFileTaskExecutorFromFile(cfg.bashCommandsFile)
-		if err != nil {
-			logger.Fatalw("failed to load bash executor config", "file", cfg.bashCommandsFile, "err", err)
+	case "", "bash", "bash_file", "bash_payload":
+		if cfg.bashCommandsFile != "" {
+			commands, err := schedulor.LoadBashTaskCommandsFromFile(cfg.bashCommandsFile)
+			if err != nil {
+				logger.Fatalw("failed to load bash executor config", "file", cfg.bashCommandsFile, "err", err)
+			}
+			return schedulor.NewBashTaskExecutorWithCommands(commands)
 		}
-		return taskExec
-	case "bash_payload":
 		return schedulor.NewBashTaskExecutor(splitCSV(cfg.executorTaskNames), cfg.commandField)
 	default:
 		logger.Fatalw("unsupported executor type", "executor", cfg.executorType)

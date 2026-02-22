@@ -14,7 +14,7 @@ go run ./cmd/schedulor
 
 - `--queue-backend` или `SCHEDULOR_QUEUE_BACKEND` (`postgres|redis|kafka|noop`)
 - `--db-dsn` или `SCHEDULOR_DB_DSN`
-- `--executor` или `SCHEDULOR_EXECUTOR` (`bash_file|bash_payload`)
+- `--executor` или `SCHEDULOR_EXECUTOR` (`bash`)
 - `--bash-commands-file` или `SCHEDULOR_BASH_COMMANDS_FILE`
 - `--executor-task-names` или `SCHEDULOR_EXECUTOR_TASK_NAMES`
 - `--executor-command-field` или `SCHEDULOR_EXECUTOR_COMMAND_FIELD`
@@ -30,10 +30,10 @@ backend := queue.NewPostgresQueue(db, &queue.PostgresQueueOptions{
   TaskMaxAttempts: 25,
   TaskVisibility:  60 * time.Second,
 })
-taskExec, err := schedulor.NewBashFileTaskExecutorFromFile("/absolute/path/to/commands.json")
-if err != nil {
-  panic(err)
+commands := map[string]schedulor.BashTaskCommand{
+  "health_ping": {Args: []string{"curl", "-fsS", "http://localhost:8080/health"}},
 }
+taskExec := schedulor.NewBashTaskExecutorWithCommands(commands)
 
 if err := schedulor.LoadSettingsFromEnv(); err != nil {
   panic(err)
@@ -65,16 +65,15 @@ app.Run()
 
 `FxApp` больше не требует PostgreSQL по умолчанию: можно передать только нужные компоненты.
 
-## Bash File Executor
+## Bash Task Executor
 
 `LqExecutor` собирается из интерфейсов: backend очереди + стратегия выполнения задач.
 
-Для запуска задач через bash-команды из JSON-файла:
+Для запуска задач через команды из JSON-файла:
 
-1. Загрузи стратегию:
-`exec, err := NewBashFileTaskExecutorFromFile("/absolute/path/to/commands.json")`
+1. На уровне конфигурации загрузить команды из файла через `schedulor.LoadBashTaskCommandsFromFile(...)`.
 2. Передай ее в `NewLqExecutor` вместе с queue backend:
-`lq, err := NewLqExecutor(logger, backend, exec, options)`
+`exec := NewBashTaskExecutorWithCommands(commands)`
 
 Пример `commands.json`:
 

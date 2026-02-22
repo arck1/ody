@@ -14,11 +14,11 @@ type TaskExecutor = executorpkg.TaskExecutor
 // CodeTaskExecutor executes tasks via in-process Go handlers.
 type CodeTaskExecutor = executorpkg.CodeTaskExecutor
 
-// BashTaskExecutor executes commands from task payload fields.
-type BashTaskExecutor = executorpkg.BashPayloadTaskExecutor
+// BashTaskExecutor executes configured commands by task name or payload.
+type BashTaskExecutor = executorpkg.BashTaskExecutor
 
-// BashFileTaskExecutor executes preconfigured commands loaded from file.
-type BashFileTaskExecutor = executorpkg.BashFileTaskExecutor
+// BashTaskCommand describes command configuration for one task.
+type BashTaskCommand = executorpkg.TaskCommand
 
 // NewCodeTaskExecutor creates an executor for in-process handlers.
 func NewCodeTaskExecutor(tasks []TaskHandler) *CodeTaskExecutor {
@@ -27,15 +27,15 @@ func NewCodeTaskExecutor(tasks []TaskHandler) *CodeTaskExecutor {
 
 // NewBashTaskExecutor creates an executor that reads shell command from payload.
 func NewBashTaskExecutor(taskNames []string, commandField string) *BashTaskExecutor {
-	return executorpkg.NewBashPayloadTaskExecutor(taskNames, commandField)
+	return executorpkg.NewBashTaskExecutor(taskNames, commandField)
 }
 
-// NewBashFileTaskExecutor creates an executor from in-memory task->command map.
-func NewBashFileTaskExecutor(commands map[string]string) *BashFileTaskExecutor {
-	return executorpkg.NewBashFileTaskExecutor(commands)
+// NewBashTaskExecutorFromCommands creates an executor from in-memory task->command map.
+func NewBashTaskExecutorFromCommands(commands map[string]string) *BashTaskExecutor {
+	return executorpkg.NewBashTaskExecutorFromCommands(commands)
 }
 
-// NewBashFileTaskExecutorFromFile loads task->command mapping from JSON file.
-func NewBashFileTaskExecutorFromFile(path string) (*BashFileTaskExecutor, error) {
-	return executorpkg.NewBashFileTaskExecutorFromFile(path)
+// NewBashTaskExecutorWithCommands creates an executor from extended command config.
+func NewBashTaskExecutorWithCommands(commands map[string]BashTaskCommand) *BashTaskExecutor {
+	return executorpkg.NewBashTaskExecutorWithCommands(commands)
 }

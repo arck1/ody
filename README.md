@@ -1,5 +1,36 @@
 # schedulor
 
+## Fx Entry Point
+
+Для запуска через `fx` используй `NewFxApp(...)`:
+
+```go
+backend := queue.NewPostgresQueue(db, &queue.PostgresQueueOptions{
+  TaskMaxAttempts: 25,
+  TaskVisibility:  60 * time.Second,
+})
+taskExec, err := schedulor.NewBashFileTaskExecutorFromFile("/absolute/path/to/commands.json")
+if err != nil {
+  panic(err)
+}
+
+app := schedulor.NewFxApp(schedulor.FxAppOptions{
+  DB:           db,
+  Logger:       logger,
+  QueueBackend: backend,
+  TaskExecutor: taskExec,
+  ExecutorOptions: &schedulor.LqExecutorOptions{
+    PoolingTimeout: 30 * time.Second,
+    PoolingBatch:   1,
+  },
+  SchedulerOptions: &schedulor.LqSchedulerOptions{
+    TasksRefreshEnabled: true,
+    TasksRefreshTimeout: 30 * time.Minute,
+  },
+})
+app.Run()
+```
+
 ## Bash File Executor
 
 `LqExecutor` собирается из интерфейсов: backend очереди + стратегия выполнения задач.

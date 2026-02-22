@@ -2,6 +2,8 @@ package schedulor
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"schedulor/elector"
 	queue2 "schedulor/queue"
 	"time"
@@ -9,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
-	"gorm.io/gorm"
 
 	"github.com/go-co-op/gocron/v2"
 	"go.uber.org/fx"
@@ -91,7 +92,6 @@ func NewLqScheduler(
 		if err != nil {
 			logger.Fatalw("failed to init refresh tasks", "err", err)
 		}
-		// Регистрируем задачу обновления задач из базы
 		_, err := sch.AddLocalJob(
 			gocron.DurationJob(settings.TasksRefreshTimeout),
 			gocron.NewTask(sch.refreshTasks),
@@ -146,7 +146,6 @@ func (s *LqScheduler) Init(lifecycle fx.Lifecycle) {
 	})
 }
 
-// leaderHeartbeat Пустая задача, для поддержания актуального статуса лидера
 func (s *LqScheduler) leaderHeartbeat(ctx context.Context) error {
 	return nil
 }
@@ -157,7 +156,7 @@ func (s *LqScheduler) refreshTasks(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	schedules, err := gorm.G[LqSchedule](db).Find(ctx)
+	schedules, err := loadSchedules(ctx, db)
 	if err != nil {
 		return err
 	}
@@ -180,16 +179,91 @@ func (s *LqScheduler) refreshTasks(ctx context.Context) error {
 	return nil
 }
 
+func loadSchedules(ctx context.Context, db *sql.DB) ([]LqSchedule, error) {
+	rows, err := db.QueryContext(
+		ctx,
+		`SELECT id, task_name, cron, payload, is_active, next_run, last_run, task_id, updated, description
+		 FROM lq_schedules`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	schedules := make([]LqSchedule, 0)
+	for rows.Next() {
+		schedule, scanErr := scanSchedule(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		schedules = append(schedules, schedule)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return schedules, nil
+}
+
+func scanSchedule(rows *sql.Rows) (LqSchedule, error) {
+	var (
+		idRaw      string
+		payloadRaw []byte
+		nextRunRaw sql.NullTime
+		lastRunRaw sql.NullTime
+		taskIDRaw  sql.NullInt64
+		descRaw    sql.NullString
+		schedule   LqSchedule
+	)
+	if err := rows.Scan(
+		&idRaw,
+		&schedule.TaskName,
+		&schedule.Cron,
+		&payloadRaw,
+		&schedule.IsActive,
+		&nextRunRaw,
+		&lastRunRaw,
+		&taskIDRaw,
+		&schedule.Updated,
+		&descRaw,
+	); err != nil {
+		return LqSchedule{}, err
+	}
+
+	id, err := uuid.Parse(idRaw)
+	if err != nil {
+		return LqSchedule{}, fmt.Errorf("invalid schedule id %q: %w", idRaw, err)
+	}
+	schedule.Id = id
+	schedule.Payload = queue2.JSONPayload(payloadRaw)
+	if nextRunRaw.Valid {
+		nextRun := nextRunRaw.Time
+		schedule.NextRun = &nextRun
+	}
+	if lastRunRaw.Valid {
+		lastRun := lastRunRaw.Time
+		schedule.LastRun = &lastRun
+	}
+	if taskIDRaw.Valid {
+		taskID := taskIDRaw.Int64
+		schedule.TaskID = &taskID
+	}
+	if descRaw.Valid {
+		desc := descRaw.String
+		schedule.Description = &desc
+	}
+
+	return schedule, nil
+}
+
 func (s *LqScheduler) UpdateSchedule(item gocron.Job, schedule LqSchedule) error {
 	if !schedule.IsActive {
-		// Если job стал неактивным, то исключаем его
 		err := s.scheduler.RemoveJob(item.ID())
 		if err != nil {
 			s.logger.Warnf("Failed to remove job %s", schedule.Id)
 		}
 		return nil
 	}
-	var update = false
+	update := false
 	lastRun, err := item.LastRun()
 	if err != nil {
 		update = true
@@ -198,7 +272,6 @@ func (s *LqScheduler) UpdateSchedule(item gocron.Job, schedule LqSchedule) error
 	}
 
 	if update {
-		// Обновляем job если он не запускался, либо после последнего запуска
 		_, err = s.scheduler.Update(
 			item.ID(),
 			gocron.CronJob(schedule.Cron, false),
@@ -216,7 +289,6 @@ func (s *LqScheduler) CreateSchedule(schedule LqSchedule) error {
 	if !schedule.IsActive {
 		return nil
 	}
-	// Обновляем job если он не запускался, либо после последнего запуска
 	_, err := s.AddJob(
 		gocron.CronJob(schedule.Cron, false),
 		gocron.NewTask(s.Run, schedule),
@@ -230,8 +302,8 @@ func (s *LqScheduler) CreateSchedule(schedule LqSchedule) error {
 
 func (s *LqScheduler) Run(ctx context.Context, schedule LqSchedule) (err error) {
 	s.logger.Infof("Run Task %s", schedule.TaskName)
-	var taskId *int64
-	taskId, err = s.queue.Enqueue(
+	var taskID *int64
+	taskID, err = s.queue.Enqueue(
 		ctx,
 		schedule.TaskName,
 		schedule.Payload,
@@ -240,7 +312,7 @@ func (s *LqScheduler) Run(ctx context.Context, schedule LqSchedule) (err error) 
 	)
 
 	if err == nil {
-		updateErr := s.UpdateScheduleRun(ctx, schedule, taskId)
+		updateErr := s.UpdateScheduleRun(ctx, schedule, taskID)
 		if updateErr != nil {
 			s.logger.Warnw("Failed to update job", "id", schedule.Id, "err", err)
 		}
@@ -261,33 +333,32 @@ func (s *LqScheduler) GetJob(id uuid.UUID) gocron.Job {
 func (s *LqScheduler) UpdateScheduleRun(
 	ctx context.Context,
 	schedule LqSchedule,
-	taskId *int64,
+	taskID *int64,
 ) error {
 	db, err := s.db.GetConnect(ctx)
 	if err != nil {
 		s.logger.Warnf("Failed to get db connection for task %s", schedule.TaskName)
-		// если задача выполнилась, но не получилось обновить информацию
 		return nil
 	}
 
 	job := s.GetJob(schedule.Id)
-
-	var nextRun *time.Time = nil
-
+	var nextRun *time.Time
 	if job != nil {
-		var nextJobRun time.Time
-		nextJobRun, err = job.NextRun()
-		if err == nil {
+		nextJobRun, nextErr := job.NextRun()
+		if nextErr == nil {
 			nextRun = &nextJobRun
 		}
 	}
-	now := time.Now().UTC()
-	_, err = gorm.G[LqSchedule](db).Where("id = ?", schedule.Id).Updates(ctx, LqSchedule{
-		TaskID:  taskId,
-		LastRun: &now,
-		NextRun: nextRun,
-	})
 
+	now := time.Now().UTC()
+	_, err = db.ExecContext(
+		ctx,
+		`UPDATE lq_schedules SET task_id = $1, last_run = $2, next_run = $3 WHERE id = $4`,
+		taskID,
+		now,
+		nextRun,
+		schedule.Id.String(),
+	)
 	if err != nil {
 		return err
 	}

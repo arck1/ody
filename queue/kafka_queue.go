@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/datatypes"
 )
 
 type KafkaQueue struct{}
@@ -17,7 +16,7 @@ func NewKafkaQueue() *KafkaQueue {
 func (q *KafkaQueue) Enqueue(
 	ctx context.Context,
 	taskName string,
-	payload datatypes.JSONType[map[string]any],
+	payload JSONPayload,
 	availableAt time.Time,
 	idemKey string,
 ) (*int64, error) {

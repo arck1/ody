@@ -2,9 +2,8 @@ package elector
 
 import (
 	"context"
+	"database/sql"
 	"time"
-
-	"gorm.io/gorm"
 )
 
 type LeaderElector interface {
@@ -15,7 +14,7 @@ type LeaderElector interface {
 }
 
 type DbConnector interface {
-	GetConnect(ctx context.Context) (*gorm.DB, error)
+	GetConnect(ctx context.Context) (*sql.DB, error)
 }
 
 type Options struct {

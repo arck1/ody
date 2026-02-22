@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"time"
-
-	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 type PgLeaderElector struct {
@@ -43,36 +40,28 @@ func (p *PgLeaderElector) tryBecomeLeader(ctx context.Context) (bool, error) {
 	}
 
 	now := time.Now().UTC()
-	result := gorm.WithResult()
-	err = gorm.G[lqScheduleLeader](db, result, clause.OnConflict{
-		Columns: []clause.Column{{Name: "key"}},
-		DoUpdates: clause.Assignments(map[string]interface{}{
-			"leader_id":   gorm.Expr("EXCLUDED.leader_id"),
-			"valid_until": gorm.Expr("EXCLUDED.valid_until"),
-		}),
-		Where: clause.Where{
-			Exprs: []clause.Expression{
-				gorm.Expr(`lq_schedule_leader.leader_id = EXCLUDED.leader_id 
-				OR lq_schedule_leader.valid_until is null 
-				OR lq_schedule_leader.valid_until < ?`,
-					now,
-				),
-			},
-		},
-	}).Create(ctx, &lqScheduleLeader{
-		LeaderId:   p.GetLeaderId(),
-		Key:        p.GetLeaderKey(),
-		ValidUntil: now.Add(p.GetLeaderTTL()),
-	})
-	return result.RowsAffected > 0, err
-}
-
-type lqScheduleLeader struct {
-	Key        string    `json:"key"         gorm:"column:key"`
-	LeaderId   string    `json:"leader_id"   gorm:"column:leader_id"`
-	ValidUntil time.Time `json:"valid_until" gorm:"column:valid_until"`
-}
-
-func (lqScheduleLeader) TableName() string {
-	return "lq_schedule_leader"
+	validUntil := now.Add(p.GetLeaderTTL())
+	result, err := db.ExecContext(
+		ctx,
+		`INSERT INTO lq_schedule_leader (key, leader_id, valid_until)
+		 VALUES ($1, $2, $3)
+		 ON CONFLICT (key) DO UPDATE
+		 SET leader_id = EXCLUDED.leader_id,
+		     valid_until = EXCLUDED.valid_until
+		 WHERE lq_schedule_leader.leader_id = EXCLUDED.leader_id
+		    OR lq_schedule_leader.valid_until IS NULL
+		    OR lq_schedule_leader.valid_until < $4`,
+		p.GetLeaderKey(),
+		p.GetLeaderId(),
+		validUntil,
+		now,
+	)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
 }

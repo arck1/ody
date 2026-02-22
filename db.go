@@ -2,10 +2,9 @@ package schedulor
 
 import (
 	"context"
-
-	"gorm.io/gorm"
+	"database/sql"
 )
 
 type DbConnector interface {
-	GetConnect(ctx context.Context) (*gorm.DB, error)
+	GetConnect(ctx context.Context) (*sql.DB, error)
 }

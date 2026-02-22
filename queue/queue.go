@@ -2,18 +2,17 @@ package queue
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/datatypes"
-	"gorm.io/gorm"
 )
 
 type TasksQueue interface {
 	Enqueue(
 		ctx context.Context,
 		taskName string,
-		payload datatypes.JSONType[map[string]any],
+		payload JSONPayload,
 		availableAt time.Time,
 		idemKey string,
 	) (*int64, error)
@@ -33,7 +32,7 @@ type QueueBackend interface {
 }
 
 type DbConnector interface {
-	GetConnect(ctx context.Context) (*gorm.DB, error)
+	GetConnect(ctx context.Context) (*sql.DB, error)
 }
 
 type PostgresQueueOptions struct {
@@ -42,11 +41,11 @@ type PostgresQueueOptions struct {
 }
 
 type Claimed struct {
-	TaskID        int64                              `json:"task_id"        gorm:"column:task_id"`
-	TaskName      string                             `json:"task_name"      gorm:"column:task_name"`
-	Payload       datatypes.JSONType[map[string]any] `                      gorm:"column:payload;type:jsonb"`
-	LeaseToken    uuid.UUID                          `json:"lease_token"    gorm:"column:lease_token"`
-	ReservedUntil time.Time                          `json:"reserved_until" gorm:"column:reserved_until"`
-	Attempts      int                                `json:"attempts"       gorm:"column:attempts"`
-	MaxAttempts   int                                `json:"max_attempts"   gorm:"column:max_attempts"`
+	TaskID        int64       `json:"task_id"`
+	TaskName      string      `json:"task_name"`
+	Payload       JSONPayload `json:"payload"`
+	LeaseToken    uuid.UUID   `json:"lease_token"`
+	ReservedUntil time.Time   `json:"reserved_until"`
+	Attempts      int         `json:"attempts"`
+	MaxAttempts   int         `json:"max_attempts"`
 }

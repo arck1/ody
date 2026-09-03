@@ -158,7 +158,8 @@ engine, err := pipeline.NewEngine(store, pipelines)
 run, err := pipeline.Run(ctx, engine, flow, ImportInput{URL: url})
 ```
 
-Запуск worker:
+Запуск worker без Fx — `Run` блокируется до отмены контекста и перед возвратом
+дожидается внутренних goroutine:
 
 ```go
 runner, err := worker.New(store, registry, engine, observer, worker.Options{
@@ -167,7 +168,37 @@ runner, err := worker.New(store, registry, engine, observer, worker.Options{
   LeaseDuration:    30 * time.Second,
   HeartbeatInterval: 10 * time.Second,
 })
-go runner.Run(ctx)
+if err != nil {
+  return err
+}
+if err = runner.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+  return err
+}
+```
+
+Для Fx используется отдельный опциональный адаптер `worker/fx`; пакет `worker`
+от Fx не зависит:
+
+```go
+runner, err := worker.New(store, registry, engine, observer, workerOptions)
+if err != nil {
+  return err
+}
+lifecycle, err := workerfx.New(runner)
+if err != nil {
+  return err
+}
+
+app, err := schedulor.NewFxApp(schedulor.FxAppOptions{
+  Components: []schedulor.FxLifecycleComponent{lifecycle},
+  Options: []fx.Option{
+    fx.Provide(provideApplicationDependencies),
+  },
+})
+if err != nil {
+  return err
+}
+app.Run()
 ```
 
 Отслеживание выполнения:

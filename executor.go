@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"go.uber.org/fx"
-	"go.uber.org/zap"
 )
 
 // LqExecutor polls queue backend and dispatches claimed tasks to selected executor strategy.
@@ -18,7 +17,7 @@ type LqExecutor struct {
 	// Id is a unique executor identity used for diagnostics.
 	Id string
 	// logger writes executor events and errors.
-	logger *zap.SugaredLogger
+	logger Logger
 	// queue is a backend used to claim/ack/nack tasks.
 	queue queue.QueueBackend
 	// exec performs actual task business logic.
@@ -31,7 +30,7 @@ type LqExecutor struct {
 
 // NewLqExecutor builds executor from explicit interface dependencies.
 func NewLqExecutor(
-	logger *zap.SugaredLogger,
+	logger Logger,
 	backend queue.QueueBackend,
 	exec TaskExecutor,
 	options *LqExecutorOptions,
@@ -112,7 +111,7 @@ func (e *LqExecutor) Run(ctx context.Context) {
 
 		claimed, err := e.queue.Claim(ctx, tasksNames, e.options.PoolingBatch)
 		if err != nil {
-			e.logger.Warnw("claim error", "err", err)
+			e.logger.Warn("claim error", "err", err)
 			if !waitForPoll(ctx, e.options.PoolingTimeout) {
 				return
 			}
@@ -161,7 +160,7 @@ func (e *LqExecutor) Run(ctx context.Context) {
 			select {
 			case <-item.lost:
 				item.cancel()
-				e.logger.Warnw("task lease lost", "task_id", item.task.TaskID, "task_name", item.task.TaskName)
+				e.logger.Warn("task lease lost", "task_id", item.task.TaskID, "task_name", item.task.TaskName)
 				continue
 			default:
 			}
@@ -176,13 +175,13 @@ func (e *LqExecutor) Run(ctx context.Context) {
 					backoff := ExponentialBackoff(item.task.Attempts, item.task.MaxAttempts)
 					ok, nackErr := e.queue.Nack(ctx, item.task.TaskID, item.task.LeaseToken, err.Error(), backoff)
 					if nackErr != nil || !ok {
-						e.logger.Errorw("failed to nack task", "task_id", item.task.TaskID, "task_name", item.task.TaskName, "owned", ok, "err", nackErr)
+						e.logger.Error("failed to nack task", "task_id", item.task.TaskID, "task_name", item.task.TaskName, "owned", ok, "err", nackErr)
 					}
 				}
 			} else {
 				ok, ackErr := e.queue.Ack(ctx, item.task.TaskID, item.task.LeaseToken)
 				if ackErr != nil || !ok {
-					e.logger.Errorw("failed to ack task", "task_id", item.task.TaskID, "task_name", item.task.TaskName, "owned", ok, "err", ackErr)
+					e.logger.Error("failed to ack task", "task_id", item.task.TaskID, "task_name", item.task.TaskName, "owned", ok, "err", ackErr)
 				}
 			}
 		}
@@ -192,7 +191,7 @@ func (e *LqExecutor) Run(ctx context.Context) {
 func (e *LqExecutor) moveToDLQ(ctx context.Context, task queue.Claimed, taskErr error) {
 	ok, err := e.queue.MoveToDLQ(ctx, task.TaskID, task.LeaseToken, taskErr.Error())
 	if err != nil || !ok {
-		e.logger.Errorw(
+		e.logger.Error(
 			"failed to move task to dlq",
 			"task_id", task.TaskID,
 			"task_name", task.TaskName,
@@ -220,7 +219,7 @@ func waitForPoll(ctx context.Context, delay time.Duration) bool {
 func (e *LqExecutor) processTask(ctx context.Context, task queue.Claimed) (err error) {
 	defer func() {
 		if panicErr := recover(); panicErr != nil {
-			e.logger.Errorw(
+			e.logger.Error(
 				"task handler panic",
 				"task_id", task.TaskID,
 				"task_name", task.TaskName,

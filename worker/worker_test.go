@@ -37,6 +37,36 @@ func TestLeaseLossCancelsHandlerContext(t *testing.T) {
 	<-done
 }
 
+func TestRunWithoutFxStopsWithContext(t *testing.T) {
+	definition := task.New[struct{}, struct{}]("standalone.task")
+	module, err := task.NewModule("standalone", task.Handle(definition, func(context.Context, task.Message[struct{}]) (struct{}, error) {
+		return struct{}{}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := task.NewRegistry(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := New(execution.NewMemoryStore(), registry, nil, nil, Options{PollInterval: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runner.Run(ctx) }()
+	cancel()
+	select {
+	case err = <-done:
+		if err != context.Canceled {
+			t.Fatalf("Run error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("standalone worker did not stop")
+	}
+}
+
 func TestPermanentFailureIsStoredWithoutRetry(t *testing.T) {
 	definition := task.New[int, int]("permanent.task", task.WithMaxAttempts(5))
 	module, _ := task.NewModule("permanent", task.Handle(definition, func(context.Context, task.Message[int]) (int, error) {

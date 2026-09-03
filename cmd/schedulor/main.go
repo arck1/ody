@@ -25,14 +25,14 @@ func (c sqlConnector) GetConnect(ctx context.Context) (*sql.DB, error) {
 }
 
 type cliConfig struct {
-	queueBackend     string
-	dbDSN            string
-	executorType     string
-	bashCommandsFile string
+	queueBackend      string
+	dbDSN             string
+	executorType      string
+	bashCommandsFile  string
 	executorTaskNames string
-	commandField     string
-	logLevel         string
-	withScheduler    bool
+	commandField      string
+	logLevel          string
+	withScheduler     bool
 }
 
 type backendRuntime struct {
@@ -64,7 +64,8 @@ func main() {
 	}
 
 	taskExec := buildTaskExecutor(cfg, sugared)
-	lqExecutor, err := schedulor.NewLqExecutor(sugared, runtime.backend, taskExec, settings.LqExecutorOptions)
+	libraryLogger := schedulor.NewZapLogger(sugared)
+	lqExecutor, err := schedulor.NewLqExecutor(libraryLogger, runtime.backend, taskExec, settings.LqExecutorOptions)
 	if err != nil {
 		sugared.Fatalw("failed to create executor", "err", err)
 	}
@@ -74,7 +75,7 @@ func main() {
 		if runtime.db == nil {
 			sugared.Fatalw("selected backend does not provide db connector required by scheduler", "backend", cfg.queueBackend)
 		}
-		lqScheduler, schedulerErr := schedulor.NewLqScheduler(runtime.db, sugared, lqExecutor, settings.LqSchedulerOptions)
+		lqScheduler, schedulerErr := schedulor.NewLqScheduler(runtime.db, libraryLogger, lqExecutor, settings.LqSchedulerOptions)
 		if schedulerErr != nil {
 			sugared.Fatalw("failed to create scheduler", "err", schedulerErr)
 		}
@@ -279,7 +280,8 @@ func (noopQueue) Claim(ctx context.Context, tasks []string, limit int) ([]queue.
 	return nil, nil
 }
 
-func (noopQueue) StartHeartbeat(ctx context.Context, taskId int64, leaseToken uuid.UUID, lost chan struct{}) {}
+func (noopQueue) StartHeartbeat(ctx context.Context, taskId int64, leaseToken uuid.UUID, lost chan struct{}) {
+}
 
 func (noopQueue) Ack(ctx context.Context, taskId int64, leaseToken uuid.UUID) (bool, error) {
 	return true, nil
@@ -295,7 +297,7 @@ func (noopQueue) Nack(
 	return true, nil
 }
 
-func (noopQueue) MoveToDLQ(ctx context.Context, taskId int64) (bool, error) {
+func (noopQueue) MoveToDLQ(ctx context.Context, taskId int64, leaseToken uuid.UUID, errText string) (bool, error) {
 	return true, nil
 }
 

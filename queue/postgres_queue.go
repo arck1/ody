@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +19,12 @@ type PostgresQueue struct {
 
 // NewPostgresQueue creates Postgres-backed queue from explicit options.
 func NewPostgresQueue(db DbConnector, options PostgresQueueOptions) *PostgresQueue {
+	if options.TaskMaxAttempts <= 0 {
+		options.TaskMaxAttempts = 25
+	}
+	if options.TaskVisibility <= 0 {
+		options.TaskVisibility = 60 * time.Second
+	}
 	return &PostgresQueue{
 		db:      db,
 		options: options,
@@ -153,6 +160,9 @@ func (q *PostgresQueue) StartHeartbeat(
 			return
 		case <-ticker.C:
 			ok, err := q.Heartbeat(ctx, taskID, leaseToken)
+			if err != nil && ctx.Err() != nil {
+				return
+			}
 			if err != nil || !ok {
 				select {
 				case lost <- struct{}{}:
@@ -251,8 +261,13 @@ func (q *PostgresQueue) Nack(
 	return rows > 0, nil
 }
 
-// MoveToDLQ moves exhausted task into lq_tasks_dlq in a transaction.
-func (q *PostgresQueue) MoveToDLQ(ctx context.Context, taskID int64) (bool, error) {
+// MoveToDLQ moves a task owned by leaseToken into lq_tasks_dlq in a transaction.
+func (q *PostgresQueue) MoveToDLQ(
+	ctx context.Context,
+	taskID int64,
+	leaseToken uuid.UUID,
+	errText string,
+) (bool, error) {
 	db, err := q.db.GetConnect(ctx)
 	if err != nil {
 		return false, err
@@ -263,10 +278,32 @@ func (q *PostgresQueue) MoveToDLQ(ctx context.Context, taskID int64) (bool, erro
 	}
 	defer tx.Rollback()
 
+	updateRes, err := tx.ExecContext(
+		ctx,
+		`UPDATE lq_tasks SET last_error = $1 WHERE task_id = $2 AND lease_token = $3`,
+		errText,
+		taskID,
+		leaseToken,
+	)
+	if err != nil {
+		return false, err
+	}
+	owned, err := updateRes.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if owned < 1 {
+		if err = tx.Commit(); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+
 	insertRes, err := tx.ExecContext(
 		ctx,
-		`INSERT INTO lq_tasks_dlq SELECT * FROM lq_tasks WHERE task_id = $1 AND attempts >= max_attempts`,
+		`INSERT INTO lq_tasks_dlq SELECT * FROM lq_tasks WHERE task_id = $1 AND lease_token = $2`,
 		taskID,
+		leaseToken,
 	)
 	if err != nil {
 		return false, err
@@ -282,8 +319,21 @@ func (q *PostgresQueue) MoveToDLQ(ctx context.Context, taskID int64) (bool, erro
 		return false, nil
 	}
 
-	if _, err = tx.ExecContext(ctx, `DELETE FROM lq_tasks WHERE task_id = $1`, taskID); err != nil {
+	deleteRes, err := tx.ExecContext(
+		ctx,
+		`DELETE FROM lq_tasks WHERE task_id = $1 AND lease_token = $2`,
+		taskID,
+		leaseToken,
+	)
+	if err != nil {
 		return false, err
+	}
+	deleted, err := deleteRes.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if deleted != inserted {
+		return false, fmt.Errorf("move task %d to dlq: inserted %d rows, deleted %d", taskID, inserted, deleted)
 	}
 	if err = tx.Commit(); err != nil {
 		return false, err

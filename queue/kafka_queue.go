@@ -56,6 +56,6 @@ func (q *KafkaQueue) Nack(
 }
 
 // MoveToDLQ is not implemented for Kafka backend yet.
-func (q *KafkaQueue) MoveToDLQ(ctx context.Context, taskId int64) (bool, error) {
+func (q *KafkaQueue) MoveToDLQ(ctx context.Context, taskId int64, leaseToken uuid.UUID, errText string) (bool, error) {
 	return false, ErrNotImplemented
 }

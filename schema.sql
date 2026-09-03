@@ -48,7 +48,9 @@ $$
 BEGIN
     IF (OLD.task_name IS DISTINCT FROM NEW.task_name) OR
        (OLD.cron IS DISTINCT FROM NEW.cron) OR
-       (OLD.is_active IS DISTINCT FROM NEW.is_active) THEN
+       (OLD.payload IS DISTINCT FROM NEW.payload) OR
+       (OLD.is_active IS DISTINCT FROM NEW.is_active) OR
+       (OLD.description IS DISTINCT FROM NEW.description) THEN
         NEW.updated := now();
     END IF;
     RETURN NEW;
@@ -69,4 +71,3 @@ CREATE TABLE IF NOT EXISTS lq_schedule_leader
     leader_id   VARCHAR NOT NULL,
     valid_until TIMESTAMPTZ
 );
-

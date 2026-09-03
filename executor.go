@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"runtime/debug"
 	"schedulor/queue"
+	"sync"
 	"time"
 
 	"go.uber.org/fx"
@@ -24,6 +25,8 @@ type LqExecutor struct {
 	exec TaskExecutor
 	// options controls polling and batching behavior.
 	options LqExecutorOptions
+	// lifecycleWG tracks the polling loop started by the fx lifecycle.
+	lifecycleWG sync.WaitGroup
 }
 
 // NewLqExecutor builds executor from explicit interface dependencies.
@@ -67,12 +70,26 @@ func (e *LqExecutor) Init(lifecycle fx.Lifecycle) {
 	executorCtx, cancel := context.WithCancel(context.Background())
 	lifecycle.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			go e.Run(executorCtx)
+			e.lifecycleWG.Add(1)
+			go func() {
+				defer e.lifecycleWG.Done()
+				e.Run(executorCtx)
+			}()
 			return nil
 		},
 		OnStop: func(ctx context.Context) error {
 			cancel()
-			return nil
+			stopped := make(chan struct{})
+			go func() {
+				e.lifecycleWG.Wait()
+				close(stopped)
+			}()
+			select {
+			case <-stopped:
+				return nil
+			case <-ctx.Done():
+				return fmt.Errorf("stop executor: %w", ctx.Err())
+			}
 		},
 	})
 }
@@ -96,48 +113,106 @@ func (e *LqExecutor) Run(ctx context.Context) {
 		claimed, err := e.queue.Claim(ctx, tasksNames, e.options.PoolingBatch)
 		if err != nil {
 			e.logger.Warnw("claim error", "err", err)
-			time.Sleep(e.options.PoolingTimeout)
+			if !waitForPoll(ctx, e.options.PoolingTimeout) {
+				return
+			}
 			continue
 		}
 		if len(claimed) == 0 {
-			time.Sleep(e.options.PoolingTimeout)
+			if !waitForPoll(ctx, e.options.PoolingTimeout) {
+				return
+			}
 			continue
 		}
 
+		type activeTask struct {
+			task   queue.Claimed
+			ctx    context.Context
+			cancel context.CancelFunc
+			lost   chan struct{}
+		}
+		active := make([]activeTask, 0, len(claimed))
 		for _, task := range claimed {
+			jobCtx, cancel := context.WithCancel(ctx)
+			lost := make(chan struct{}, 1)
+			active = append(active, activeTask{task: task, ctx: jobCtx, cancel: cancel, lost: lost})
+			go e.queue.StartHeartbeat(jobCtx, task.TaskID, task.LeaseToken, lost)
+		}
+
+		for i, item := range active {
 			select {
 			case <-ctx.Done():
+				for _, pending := range active[i:] {
+					pending.cancel()
+				}
 				return
 			default:
 			}
-			jobCtx, cancel := context.WithCancel(ctx)
-			lost := make(chan struct{}, 1)
-			go e.queue.StartHeartbeat(jobCtx, task.TaskID, task.LeaseToken, lost)
 
-			// Работа
-			err = e.processTask(jobCtx, task)
-			cancel() // остановить heartbeat
+			// The lease heartbeat is already running for every task in the claimed batch.
+			err = e.processTask(item.ctx, item.task)
+			if ctx.Err() != nil {
+				for _, pending := range active[i:] {
+					pending.cancel()
+				}
+				return
+			}
 
 			select {
-			case <-lost:
-				// аренду потеряли — не ack’аем; задачу подберут другие
+			case <-item.lost:
+				item.cancel()
+				e.logger.Warnw("task lease lost", "task_id", item.task.TaskID, "task_name", item.task.TaskName)
 				continue
 			default:
 			}
+			item.cancel()
 
 			if errors.As(err, &unknownTaskError) {
-				_, _ = e.queue.Nack(ctx, task.TaskID, task.LeaseToken, err.Error(), 0)
+				e.moveToDLQ(ctx, item.task, err)
 			} else if err != nil {
-				backoff := ExponentialBackoff(task.Attempts, task.MaxAttempts)
-				_, _ = e.queue.Nack(ctx, task.TaskID, task.LeaseToken, err.Error(), backoff)
-
-				if task.Attempts >= task.MaxAttempts {
-					_, _ = e.queue.MoveToDLQ(ctx, task.TaskID)
+				if item.task.Attempts >= item.task.MaxAttempts {
+					e.moveToDLQ(ctx, item.task, err)
+				} else {
+					backoff := ExponentialBackoff(item.task.Attempts, item.task.MaxAttempts)
+					ok, nackErr := e.queue.Nack(ctx, item.task.TaskID, item.task.LeaseToken, err.Error(), backoff)
+					if nackErr != nil || !ok {
+						e.logger.Errorw("failed to nack task", "task_id", item.task.TaskID, "task_name", item.task.TaskName, "owned", ok, "err", nackErr)
+					}
 				}
 			} else {
-				_, _ = e.queue.Ack(ctx, task.TaskID, task.LeaseToken)
+				ok, ackErr := e.queue.Ack(ctx, item.task.TaskID, item.task.LeaseToken)
+				if ackErr != nil || !ok {
+					e.logger.Errorw("failed to ack task", "task_id", item.task.TaskID, "task_name", item.task.TaskName, "owned", ok, "err", ackErr)
+				}
 			}
 		}
+	}
+}
+
+func (e *LqExecutor) moveToDLQ(ctx context.Context, task queue.Claimed, taskErr error) {
+	ok, err := e.queue.MoveToDLQ(ctx, task.TaskID, task.LeaseToken, taskErr.Error())
+	if err != nil || !ok {
+		e.logger.Errorw(
+			"failed to move task to dlq",
+			"task_id", task.TaskID,
+			"task_name", task.TaskName,
+			"owned", ok,
+			"err", err,
+		)
+	}
+}
+
+func waitForPoll(ctx context.Context, delay time.Duration) bool {
+	if delay <= 0 {
+		return ctx.Err() == nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 

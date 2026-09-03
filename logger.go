@@ -1,30 +1,47 @@
 package schedulor
 
 import (
+	"fmt"
+
 	"go.uber.org/zap"
 )
 
-// LqLogger adapts zap.SugaredLogger to gocron logger interface.
+// Logger is the logging contract used by schedulor components.
+// Fields are passed as alternating key/value pairs.
+type Logger interface {
+	Debug(message string, fields ...any)
+	Info(message string, fields ...any)
+	Warn(message string, fields ...any)
+	Error(message string, fields ...any)
+}
+
+type zapLogger struct {
+	logger *zap.SugaredLogger
+}
+
+var _ Logger = zapLogger{}
+
+// NewZapLogger adapts zap.SugaredLogger to Logger. It returns nil for a nil
+// logger so constructor validation remains predictable.
+func NewZapLogger(logger *zap.SugaredLogger) Logger {
+	if logger == nil {
+		return nil
+	}
+	return zapLogger{logger: logger}
+}
+
+func (l zapLogger) Debug(message string, fields ...any) { l.logger.Debugw(message, fields...) }
+func (l zapLogger) Info(message string, fields ...any)  { l.logger.Infow(message, fields...) }
+func (l zapLogger) Warn(message string, fields ...any)  { l.logger.Warnw(message, fields...) }
+func (l zapLogger) Error(message string, fields ...any) { l.logger.Errorw(message, fields...) }
+
+// LqLogger adapts Logger to the printf-style logger expected by gocron.
+// Deprecated: schedulor constructs this adapter internally.
 type LqLogger struct {
-	*zap.SugaredLogger
+	Logger
 }
 
-// Error adapts gocron logger interface to zap Errorf.
-func (l LqLogger) Error(msg string, args ...any) {
-	l.Errorf(msg, args...)
-}
-
-// Info adapts gocron logger interface to zap Infof.
-func (l LqLogger) Info(msg string, args ...any) {
-	l.Infof(msg, args...)
-}
-
-// Warn adapts gocron logger interface to zap Warnf.
-func (l LqLogger) Warn(msg string, args ...any) {
-	l.Warnf(msg, args...)
-}
-
-// Debug adapts gocron logger interface to zap Debugf.
-func (l LqLogger) Debug(msg string, args ...any) {
-	l.Debugf(msg, args...)
-}
+func (l LqLogger) Error(message string, args ...any) { l.Logger.Error(fmt.Sprintf(message, args...)) }
+func (l LqLogger) Info(message string, args ...any)  { l.Logger.Info(fmt.Sprintf(message, args...)) }
+func (l LqLogger) Warn(message string, args ...any)  { l.Logger.Warn(fmt.Sprintf(message, args...)) }
+func (l LqLogger) Debug(message string, args ...any) { l.Logger.Debug(fmt.Sprintf(message, args...)) }

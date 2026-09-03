@@ -30,8 +30,8 @@ type WorkerQueue interface {
 	Ack(ctx context.Context, taskId int64, leaseToken uuid.UUID) (bool, error)
 	// Nack returns failed task back to queue with delay.
 	Nack(ctx context.Context, taskId int64, leaseToken uuid.UUID, errText string, delay time.Duration) (bool, error)
-	// MoveToDLQ moves exhausted task to dead-letter queue.
-	MoveToDLQ(ctx context.Context, taskId int64) (bool, error)
+	// MoveToDLQ atomically moves a task owned by leaseToken to the dead-letter queue.
+	MoveToDLQ(ctx context.Context, taskId int64, leaseToken uuid.UUID, errText string) (bool, error)
 }
 
 // QueueBackend combines producer and worker queue capabilities.

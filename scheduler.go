@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"fmt"
 	"schedulor/queue"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/go-co-op/gocron/v2"
 	"go.uber.org/fx"
@@ -26,7 +26,7 @@ type LqScheduler struct {
 	// db provides SQL connections for reading/updating schedules.
 	db DbConnector
 	// logger writes scheduler events and warnings.
-	logger *zap.SugaredLogger
+	logger Logger
 	// scheduler runs leader-only jobs.
 	scheduler gocron.Scheduler
 	// localScheduler runs jobs on every instance regardless of leadership.
@@ -35,12 +35,15 @@ type LqScheduler struct {
 	queue queue.TasksQueue
 	// options stores resolved scheduler options.
 	options LqSchedulerOptions
+	// scheduleJobs contains only DB-backed jobs, excluding internal and user-added jobs.
+	scheduleJobs map[uuid.UUID]time.Time
+	scheduleMu   sync.Mutex
 }
 
 // NewLqScheduler creates scheduler instances and registers internal maintenance jobs.
 func NewLqScheduler(
 	db DbConnector,
-	logger *zap.SugaredLogger,
+	logger Logger,
 	executor *LqExecutor,
 	options *LqSchedulerOptions,
 ) (*LqScheduler, error) {
@@ -83,6 +86,7 @@ func NewLqScheduler(
 		localScheduler: localScheduler,
 		queue:          executor.GetQueue(),
 		options:        *settings.LqSchedulerOptions,
+		scheduleJobs:   make(map[uuid.UUID]time.Time),
 	}
 
 	if settings.LeaderHeartbeatEnabled {
@@ -178,20 +182,38 @@ func (s *LqScheduler) refreshTasks(ctx context.Context) error {
 	currentJobs := lo.Associate(s.scheduler.Jobs(), func(item gocron.Job) (uuid.UUID, gocron.Job) {
 		return item.ID(), item
 	})
+	seen := make(map[uuid.UUID]struct{}, len(schedules))
 	for _, schedule := range schedules {
+		seen[schedule.Id] = struct{}{}
 		if item, ok := currentJobs[schedule.Id]; ok {
 			err = s.UpdateSchedule(item, schedule)
 			if err != nil {
-				s.logger.Warnw("Failed to update job", "id", schedule.Id, "err", err)
+				s.logger.Warn("Failed to update job", "id", schedule.Id, "err", err)
 			}
 		} else {
 			err = s.CreateSchedule(schedule)
 			if err != nil {
-				s.logger.Warnw("Failed to create job", "id", schedule.Id, "err", err)
+				s.logger.Warn("Failed to create job", "id", schedule.Id, "err", err)
 			}
 		}
 	}
+	s.removeMissingSchedules(seen)
 	return nil
+}
+
+func (s *LqScheduler) removeMissingSchedules(seen map[uuid.UUID]struct{}) {
+	s.scheduleMu.Lock()
+	defer s.scheduleMu.Unlock()
+	for id := range s.scheduleJobs {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		if err := s.scheduler.RemoveJob(id); err != nil {
+			s.logger.Warn("failed to remove deleted schedule", "id", id, "err", err)
+			continue
+		}
+		delete(s.scheduleJobs, id)
+	}
 }
 
 // loadSchedules fetches all schedule records from DB.
@@ -275,30 +297,28 @@ func scanSchedule(rows *sql.Rows) (LqSchedule, error) {
 // UpdateSchedule updates existing in-memory job when DB row changed.
 func (s *LqScheduler) UpdateSchedule(item gocron.Job, schedule LqSchedule) error {
 	if !schedule.IsActive {
-		err := s.scheduler.RemoveJob(item.ID())
-		if err != nil {
-			s.logger.Warnf("Failed to remove job %s", schedule.Id)
+		if err := s.scheduler.RemoveJob(item.ID()); err != nil {
+			return fmt.Errorf("remove inactive schedule %s: %w", schedule.Id, err)
 		}
+		s.untrackSchedule(schedule.Id)
 		return nil
 	}
-	update := false
-	lastRun, err := item.LastRun()
-	if err != nil {
-		update = true
-	} else if schedule.Updated.After(lastRun) {
-		update = true
-	}
+	s.scheduleMu.Lock()
+	loadedVersion, tracked := s.scheduleJobs[schedule.Id]
+	s.scheduleMu.Unlock()
+	update := !tracked || schedule.Updated.After(loadedVersion)
 
 	if update {
-		_, err = s.scheduler.Update(
+		_, err := s.scheduler.Update(
 			item.ID(),
 			gocron.CronJob(schedule.Cron, false),
 			gocron.NewTask(s.Run, schedule),
 			gocron.WithIdentifier(schedule.Id),
 		)
 		if err != nil {
-			s.logger.Warnf("Failed to update job %s", schedule.Id)
+			return fmt.Errorf("update schedule %s: %w", schedule.Id, err)
 		}
+		s.trackSchedule(schedule.Id, schedule.Updated)
 	}
 	return nil
 }
@@ -314,14 +334,27 @@ func (s *LqScheduler) CreateSchedule(schedule LqSchedule) error {
 		gocron.WithIdentifier(schedule.Id),
 	)
 	if err != nil {
-		s.logger.Warnf("Failed to update job %s", schedule.Id)
+		return fmt.Errorf("create schedule %s: %w", schedule.Id, err)
 	}
+	s.trackSchedule(schedule.Id, schedule.Updated)
 	return nil
+}
+
+func (s *LqScheduler) trackSchedule(id uuid.UUID, updated time.Time) {
+	s.scheduleMu.Lock()
+	defer s.scheduleMu.Unlock()
+	s.scheduleJobs[id] = updated
+}
+
+func (s *LqScheduler) untrackSchedule(id uuid.UUID) {
+	s.scheduleMu.Lock()
+	defer s.scheduleMu.Unlock()
+	delete(s.scheduleJobs, id)
 }
 
 // Run enqueues a runtime task for schedule execution and updates run metadata.
 func (s *LqScheduler) Run(ctx context.Context, schedule LqSchedule) (err error) {
-	s.logger.Infof("Run Task %s", schedule.TaskName)
+	s.logger.Info("Run Task", "task_name", schedule.TaskName)
 	var taskID *int64
 	taskID, err = s.queue.Enqueue(
 		ctx,
@@ -334,7 +367,7 @@ func (s *LqScheduler) Run(ctx context.Context, schedule LqSchedule) (err error) 
 	if err == nil {
 		updateErr := s.UpdateScheduleRun(ctx, schedule, taskID)
 		if updateErr != nil {
-			s.logger.Warnw("Failed to update job", "id", schedule.Id, "err", err)
+			s.logger.Warn("Failed to update job", "id", schedule.Id, "err", updateErr)
 		}
 	}
 
@@ -359,8 +392,7 @@ func (s *LqScheduler) UpdateScheduleRun(
 ) error {
 	db, err := s.db.GetConnect(ctx)
 	if err != nil {
-		s.logger.Warnf("Failed to get db connection for task %s", schedule.TaskName)
-		return nil
+		return fmt.Errorf("get db connection for task %s: %w", schedule.TaskName, err)
 	}
 
 	job := s.GetJob(schedule.Id)

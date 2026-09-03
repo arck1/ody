@@ -6,6 +6,7 @@ package schedulor
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,7 +15,12 @@ import (
 	"time"
 
 	"schedulor/elector"
+	"schedulor/execution"
+	executionpostgres "schedulor/execution/postgres"
+	"schedulor/pipeline"
 	"schedulor/queue"
+	taskv2 "schedulor/task"
+	workerv2 "schedulor/worker"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/testcontainers/testcontainers-go"
@@ -77,7 +83,7 @@ func TestPostgresQueueLifecycleIntegration(t *testing.T) {
 		t.Fatalf("expected attempts=2, got %d", claimed2.Attempts)
 	}
 
-	moved, err := q.MoveToDLQ(ctx, claimed2.TaskID)
+	moved, err := q.MoveToDLQ(ctx, claimed2.TaskID, claimed2.LeaseToken, "attempts exhausted")
 	if err != nil {
 		t.Fatalf("move to dlq error: %v", err)
 	}
@@ -190,6 +196,79 @@ func TestPgLeaderElectorIntegration(t *testing.T) {
 	}
 }
 
+func TestPersistentPipelineIntegration(t *testing.T) {
+	t.Parallel()
+	db := setupIntegrationDB(t)
+	store, err := executionpostgres.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Migrate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	double := taskv2.New[int, int]("pipeline.double")
+	stringify := taskv2.New[int, string]("pipeline.stringify")
+	module, err := taskv2.NewModule("pipeline",
+		taskv2.Handle(double, func(_ context.Context, message taskv2.Message[int]) (int, error) { return message.Input * 2, nil }),
+		taskv2.Handle(stringify, func(_ context.Context, message taskv2.Message[int]) (string, error) {
+			return fmt.Sprintf("result:%d", message.Input), nil
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tasks, err := taskv2.NewRegistry(module)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow := pipeline.New[int]("persistent-flow", 1)
+	first := pipeline.Start(flow, "double", double, func(input int) int { return input })
+	last := pipeline.Then(flow, first, "stringify", stringify, func(output int) int { return output })
+	pipelines, err := pipeline.NewRegistry(flow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine, err := pipeline.NewEngine(store, pipelines)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := pipeline.Run(context.Background(), engine, flow, 21)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := workerv2.New(store, tasks, engine, nil, workerv2.Options{Concurrency: 2, PollInterval: 5 * time.Millisecond, LeaseDuration: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { _ = w.Run(ctx); close(done) }()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		current, getErr := store.GetPipelineRun(context.Background(), run.ID)
+		if getErr == nil && current.Status == execution.RunSucceeded {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	current, err := store.GetPipelineRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Status != execution.RunSucceeded {
+		t.Fatalf("pipeline status: %s (%s)", current.Status, current.Error)
+	}
+	result, err := pipeline.Output(context.Background(), store, run.ID, last)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result != "result:42" {
+		t.Fatalf("result = %q", result)
+	}
+}
+
 func eventuallyClaimOne(t *testing.T, q *queue.PostgresQueue, tasks []string, timeout time.Duration) queue.Claimed {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -209,6 +288,7 @@ func eventuallyClaimOne(t *testing.T, q *queue.PostgresQueue, tasks []string, ti
 
 func setupIntegrationDB(t *testing.T) *sql.DB {
 	t.Helper()
+	testcontainers.SkipIfProviderIsNotHealthy(t)
 	ctx := context.Background()
 
 	container, err := postgres.Run(

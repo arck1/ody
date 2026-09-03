@@ -119,10 +119,10 @@ func mergeOptionsWithDefault(options *LqSettings) LqSettings {
 	if options.LqPostgresQueueOptions == nil {
 		options.LqPostgresQueueOptions = defaultSettings.LqPostgresQueueOptions
 	} else {
-		if options.TaskMaxAttempts == 0 {
+		if options.TaskMaxAttempts <= 0 {
 			options.TaskMaxAttempts = defaultSettings.TaskMaxAttempts
 		}
-		if options.TaskVisibility == 0 {
+		if options.TaskVisibility <= 0 {
 			options.TaskVisibility = defaultSettings.TaskVisibility
 		}
 	}
@@ -136,22 +136,22 @@ func mergeOptionsWithDefault(options *LqSettings) LqSettings {
 		if options.LeaderId == "" {
 			options.LeaderId = defaultSettings.LeaderId
 		}
-		if options.LeaderTTL == 0 {
+		if options.LeaderTTL <= 0 {
 			options.LeaderTTL = defaultSettings.LeaderTTL
 		}
 	}
 	if options.LqSchedulerOptions == nil {
 		options.LqSchedulerOptions = defaultSettings.LqSchedulerOptions
-	} else if options.TasksRefreshTimeout == 0 {
+	} else if options.TasksRefreshTimeout <= 0 {
 		options.TasksRefreshTimeout = defaultSettings.TasksRefreshTimeout
 	}
 	if options.LqExecutorOptions == nil {
 		options.LqExecutorOptions = defaultSettings.LqExecutorOptions
 	} else {
-		if options.PoolingTimeout == 0 {
+		if options.PoolingTimeout <= 0 {
 			options.PoolingTimeout = defaultSettings.PoolingTimeout
 		}
-		if options.PoolingBatch == 0 {
+		if options.PoolingBatch <= 0 {
 			options.PoolingBatch = defaultSettings.PoolingBatch
 		}
 	}

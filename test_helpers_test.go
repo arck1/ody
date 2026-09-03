@@ -6,12 +6,18 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"go.uber.org/zap"
 )
 
-func testLogger() *zap.SugaredLogger {
-	return zap.NewNop().Sugar()
+func testLogger() Logger {
+	return discardLogger{}
 }
+
+type discardLogger struct{}
+
+func (discardLogger) Debug(string, ...any) {}
+func (discardLogger) Info(string, ...any)  {}
+func (discardLogger) Warn(string, ...any)  {}
+func (discardLogger) Error(string, ...any) {}
 
 type testQueueBackend struct{}
 
@@ -47,6 +53,6 @@ func (q *testQueueBackend) Nack(
 	return true, nil
 }
 
-func (q *testQueueBackend) MoveToDLQ(ctx context.Context, taskId int64) (bool, error) {
+func (q *testQueueBackend) MoveToDLQ(ctx context.Context, taskId int64, leaseToken uuid.UUID, errText string) (bool, error) {
 	return true, nil
 }

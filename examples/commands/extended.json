@@ -1,0 +1,15 @@
+{
+  "tasks": {
+    "sync_reports": "/app/scripts/sync_reports.sh"
+  },
+  "list": [
+    {
+      "task_name": "health_ping",
+      "args": ["curl", "-fsS", "http://localhost:8080/health"]
+    },
+    {
+      "task_name": "print_date",
+      "args": ["date", "+%Y-%m-%dT%H:%M:%S%z"]
+    }
+  ]
+}

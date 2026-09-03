@@ -56,6 +56,6 @@ func (q *RedisQueue) Nack(
 }
 
 // MoveToDLQ is not implemented for Redis backend yet.
-func (q *RedisQueue) MoveToDLQ(ctx context.Context, taskId int64) (bool, error) {
+func (q *RedisQueue) MoveToDLQ(ctx context.Context, taskId int64, leaseToken uuid.UUID, errText string) (bool, error) {
 	return false, ErrNotImplemented
 }

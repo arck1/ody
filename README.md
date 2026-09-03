@@ -231,7 +231,8 @@ if err = store.Migrate(ctx); err != nil {
 
 ### Functional tests
 
-Функциональные сценарии используют только публичный API и MemoryStore:
+Функциональные сценарии используют только публичный API и MemoryStore. Каждый сценарий
+оформлен отдельным `testify/suite`:
 
 ```bash
 go test -count=1 -v ./functional

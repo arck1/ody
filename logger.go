@@ -35,13 +35,17 @@ func (l zapLogger) Info(message string, fields ...any)  { l.logger.Infow(message
 func (l zapLogger) Warn(message string, fields ...any)  { l.logger.Warnw(message, fields...) }
 func (l zapLogger) Error(message string, fields ...any) { l.logger.Errorw(message, fields...) }
 
-// LqLogger adapts Logger to the printf-style logger expected by gocron.
-// Deprecated: schedulor constructs this adapter internally.
-type LqLogger struct {
+// gocronLogger adapts Logger to the printf-style logger expected by gocron.
+// It is intentionally private because it is an implementation detail.
+type gocronLogger struct {
 	Logger
 }
 
-func (l LqLogger) Error(message string, args ...any) { l.Logger.Error(fmt.Sprintf(message, args...)) }
-func (l LqLogger) Info(message string, args ...any)  { l.Logger.Info(fmt.Sprintf(message, args...)) }
-func (l LqLogger) Warn(message string, args ...any)  { l.Logger.Warn(fmt.Sprintf(message, args...)) }
-func (l LqLogger) Debug(message string, args ...any) { l.Logger.Debug(fmt.Sprintf(message, args...)) }
+func (l gocronLogger) Error(message string, args ...any) {
+	l.Logger.Error(fmt.Sprintf(message, args...))
+}
+func (l gocronLogger) Info(message string, args ...any) { l.Logger.Info(fmt.Sprintf(message, args...)) }
+func (l gocronLogger) Warn(message string, args ...any) { l.Logger.Warn(fmt.Sprintf(message, args...)) }
+func (l gocronLogger) Debug(message string, args ...any) {
+	l.Logger.Debug(fmt.Sprintf(message, args...))
+}

@@ -8,7 +8,7 @@ import (
 func TestNewLqExecutorUsesProvidedInterfaces(t *testing.T) {
 	strategy := NewCodeTaskExecutor([]TaskHandler{{
 		TaskName: "ok",
-		Handler: func(ctx context.Context, payload map[string]interface{}) error {
+		Handler: func(ctx context.Context, payload map[string]any) error {
 			return nil
 		},
 	}})

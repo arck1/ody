@@ -13,7 +13,7 @@ func TestCodeTaskExecutorExecute(t *testing.T) {
 	exec := NewCodeTaskExecutor([]TaskHandler{
 		{
 			TaskName: "ok",
-			Handler: func(ctx context.Context, payload map[string]interface{}) error {
+			Handler: func(ctx context.Context, payload map[string]any) error {
 				if payload["foo"] != "bar" {
 					t.Fatalf("unexpected payload: %+v", payload)
 				}

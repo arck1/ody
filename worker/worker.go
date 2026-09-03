@@ -78,8 +78,7 @@ func New(store execution.Store, registry *task.Registry, advancer Advancer, obse
 func (w *Worker) Run(ctx context.Context) error {
 	var group sync.WaitGroup
 	for index := 0; index < w.options.Concurrency; index++ {
-		group.Add(1)
-		go func() { defer group.Done(); w.loop(ctx) }()
+		group.Go(func() { w.loop(ctx) })
 	}
 	group.Wait()
 	return ctx.Err()

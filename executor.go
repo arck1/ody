@@ -69,11 +69,9 @@ func (e *LqExecutor) Init(lifecycle fx.Lifecycle) {
 	executorCtx, cancel := context.WithCancel(context.Background())
 	lifecycle.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			e.lifecycleWG.Add(1)
-			go func() {
-				defer e.lifecycleWG.Done()
+			e.lifecycleWG.Go(func() {
 				e.Run(executorCtx)
-			}()
+			})
 			return nil
 		},
 		OnStop: func(ctx context.Context) error {

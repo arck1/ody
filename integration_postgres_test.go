@@ -1,5 +1,4 @@
 //go:build integration
-// +build integration
 
 package schedulor
 
@@ -123,7 +122,7 @@ func TestExecutorWithPostgresQueueIntegration(t *testing.T) {
 		q,
 		NewCodeTaskExecutor([]TaskHandler{{
 			TaskName: "mail",
-			Handler: func(ctx context.Context, payload map[string]interface{}) error {
+			Handler: func(ctx context.Context, payload map[string]any) error {
 				handled.Add(1)
 				return nil
 			},

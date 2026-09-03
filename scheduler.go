@@ -61,7 +61,7 @@ func NewLqScheduler(
 		LqSchedulerOptions: options,
 	})
 	localScheduler, err := gocron.NewScheduler(
-		gocron.WithLogger(LqLogger{logger}),
+		gocron.WithLogger(gocronLogger{logger}),
 		gocron.WithLocation(time.Local),
 	)
 	if err != nil {
@@ -69,7 +69,7 @@ func NewLqScheduler(
 	}
 	leaderElector := settings.LqSchedulerOptions.LeaderElector
 	schedulerOptions := []gocron.SchedulerOption{
-		gocron.WithLogger(LqLogger{logger}),
+		gocron.WithLogger(gocronLogger{logger}),
 		gocron.WithLocation(time.Local),
 	}
 	if leaderElector != nil {

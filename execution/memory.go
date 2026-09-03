@@ -164,7 +164,7 @@ func (s *MemoryStore) Claim(_ context.Context, owner string, names []string, lim
 		candidate.LeaseToken = uuid.New()
 		candidate.LeaseUntil = now.Add(lease)
 		if candidate.StartedAt == nil {
-			candidate.StartedAt = pointer(now)
+			candidate.StartedAt = new(now)
 		}
 		s.executions[candidate.ID] = candidate
 		s.appendEvent(candidate, EventStarted, "")
@@ -183,7 +183,7 @@ func (s *MemoryStore) ReapExpired(_ context.Context) ([]uuid.UUID, error) {
 		if item.Status != StatusRunning || item.LeaseUntil.After(now) || item.Attempt < item.MaxAttempts {
 			continue
 		}
-		item.Status, item.LastError, item.FinishedAt = StatusFailed, "lease expired after maximum attempts", pointer(now)
+		item.Status, item.LastError, item.FinishedAt = StatusFailed, "lease expired after maximum attempts", new(now)
 		item.LeaseToken, item.LeaseOwner, item.LeaseUntil = uuid.Nil, "", time.Time{}
 		s.executions[id] = item
 		s.appendEvent(item, EventFailed, item.LastError)
@@ -218,7 +218,7 @@ func (s *MemoryStore) Succeed(_ context.Context, id, token uuid.UUID, output jso
 		return err
 	}
 	now := s.now()
-	item.Status, item.Output, item.FinishedAt = StatusSucceeded, cloneJSON(output), pointer(now)
+	item.Status, item.Output, item.FinishedAt = StatusSucceeded, cloneJSON(output), new(now)
 	item.LeaseToken, item.LeaseOwner, item.LeaseUntil = uuid.Nil, "", time.Time{}
 	s.executions[id] = item
 	s.appendEvent(item, EventSucceeded, "")
@@ -236,7 +236,7 @@ func (s *MemoryStore) Retry(_ context.Context, id, token uuid.UUID, errorText st
 	item.LeaseToken, item.LeaseOwner, item.LeaseUntil = uuid.Nil, "", time.Time{}
 	if item.Attempt >= item.MaxAttempts {
 		now := s.now()
-		item.Status, item.FinishedAt = StatusFailed, pointer(now)
+		item.Status, item.FinishedAt = StatusFailed, new(now)
 		s.executions[id] = item
 		s.appendEvent(item, EventFailed, errorText)
 		return nil
@@ -255,7 +255,7 @@ func (s *MemoryStore) Fail(_ context.Context, id, token uuid.UUID, errorText str
 		return err
 	}
 	now := s.now()
-	item.Status, item.LastError, item.FinishedAt = StatusFailed, errorText, pointer(now)
+	item.Status, item.LastError, item.FinishedAt = StatusFailed, errorText, new(now)
 	item.LeaseToken, item.LeaseOwner, item.LeaseUntil = uuid.Nil, "", time.Time{}
 	s.executions[id] = item
 	s.appendEvent(item, EventFailed, errorText)
@@ -270,7 +270,7 @@ func (s *MemoryStore) CancelExecution(_ context.Context, id uuid.UUID, reason st
 		return ErrNotFound
 	}
 	now := s.now()
-	item.Status, item.LastError, item.FinishedAt = StatusCancelled, reason, pointer(now)
+	item.Status, item.LastError, item.FinishedAt = StatusCancelled, reason, new(now)
 	item.LeaseToken, item.LeaseOwner, item.LeaseUntil = uuid.Nil, "", time.Time{}
 	s.executions[id] = item
 	s.appendEvent(item, EventCancelled, reason)
@@ -335,7 +335,7 @@ func (s *MemoryStore) SetPipelineRunStatus(_ context.Context, id uuid.UUID, stat
 	now := s.now()
 	run.Status, run.Error, run.UpdatedAt = status, errorText, now
 	if status == RunSucceeded || status == RunFailed || status == RunCancelled {
-		run.FinishedAt = pointer(now)
+		run.FinishedAt = new(now)
 	}
 	s.runs[id] = run
 	return nil
@@ -371,4 +371,3 @@ func cloneUUID(value *uuid.UUID) *uuid.UUID {
 	copy := *value
 	return &copy
 }
-func pointer[T any](value T) *T { return &value }

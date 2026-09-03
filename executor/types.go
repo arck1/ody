@@ -7,7 +7,7 @@ import (
 )
 
 // TaskHandlerFunc processes task payload decoded from queue JSON.
-type TaskHandlerFunc func(ctx context.Context, payload map[string]interface{}) error
+type TaskHandlerFunc func(ctx context.Context, payload map[string]any) error
 
 // TaskHandler binds queue task name to handler function.
 type TaskHandler struct {

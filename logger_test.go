@@ -33,9 +33,9 @@ func TestNewZapLoggerReturnsNilForNilLogger(t *testing.T) {
 	}
 }
 
-func TestLqLoggerFormatsGocronMessages(t *testing.T) {
+func TestGocronLoggerFormatsMessages(t *testing.T) {
 	recorder := &recordingLogger{}
-	logger := LqLogger{Logger: recorder}
+	logger := gocronLogger{Logger: recorder}
 
 	logger.Warn("job %s failed after %d attempts", "sync", 3)
 

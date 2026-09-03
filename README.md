@@ -229,6 +229,17 @@ if err = store.Migrate(ctx); err != nil {
 Таблицы `task_executions`, `execution_events` и `pipeline_runs` содержат входы, результаты,
 попытки, ошибки, lease и полную историю переходов.
 
+### Functional tests
+
+Функциональные сценарии используют только публичный API и MemoryStore:
+
+```bash
+go test -count=1 -v ./functional
+```
+
+Покрыты standalone-выполнение и idempotency, отложенный запуск и retry, fan-out/fan-in pipeline,
+остановка pipeline при permanent error, отмена и запуск worker через Fx lifecycle.
+
 ## Bash Task Executor
 
 `LqExecutor` собирается из интерфейсов: backend очереди + стратегия выполнения задач.

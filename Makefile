@@ -6,7 +6,7 @@ GOLANGCI_LINT_VERSION := v2.13.2
 GO_ENV := GOCACHE=$(TOOLS_DIR)/go-build-cache
 LINT_ENV := $(GO_ENV) GOLANGCI_LINT_CACHE=$(TOOLS_DIR)/golangci-cache
 
-.PHONY: help deps-test up down restart logs ps test test-unit test-integration run-cli install-lint fmt fmt-check lint lint-fix check tidy
+.PHONY: help deps-test up down restart logs ps test test-unit test-integration test-functional-integration run-cli install-lint fmt fmt-check lint lint-fix check tidy
 
 help:
 	@echo "Targets:"
@@ -19,6 +19,7 @@ help:
 	@echo "  test              Run unit tests"
 	@echo "  test-unit         Run unit tests"
 	@echo "  test-integration  Run integration tests (requires Docker)"
+	@echo "  test-functional-integration  Run PostgreSQL/Redis functional suites"
 	@echo "  run-cli           Run schedulor CLI"
 	@echo "  install-lint      Install the pinned golangci-lint version"
 	@echo "  fmt               Format Go files with golangci-lint"
@@ -29,7 +30,7 @@ help:
 	@echo "  tidy              Run go mod tidy"
 
 deps-test:
-	go get github.com/jackc/pgx/v5/stdlib github.com/testcontainers/testcontainers-go github.com/testcontainers/testcontainers-go/modules/postgres
+	go mod download
 
 up:
 	$(COMPOSE) up -d
@@ -52,6 +53,9 @@ test-unit:
 
 test-integration: deps-test
 	$(GO_ENV) go test -tags integration ./...
+
+test-functional-integration: deps-test
+	$(GO_ENV) go test -count=1 -v -tags integration ./functional
 
 run-cli:
 	go run ./cmd/schedulor

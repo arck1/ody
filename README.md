@@ -340,6 +340,19 @@ go test -count=1 -v ./functional
 Покрыты standalone-выполнение и idempotency, отложенный запуск и retry, fan-out/fan-in pipeline,
 остановка pipeline при permanent error, отмена и запуск worker через Fx lifecycle.
 
+Отдельные infrastructure suites поднимают настоящие PostgreSQL 16 и Redis 7.4 через
+Testcontainers и проверяют публичный API библиотеки вместе с сетевым протоколом, SQL и Lua:
+
+```bash
+make test-functional-integration
+```
+
+PostgreSQL suite проверяет generic task worker, durable input/output/events, idempotency,
+Prometheus observer, operator restart и persistent fan-out/fan-in pipeline. Redis suite проверяет
+delayed delivery, atomic claim, lease heartbeat, nack/redelivery, idempotency, DLQ и полный цикл
+legacy `LqExecutor` до `ack`. Контейнеры изолированы, очищаются автоматически и требуют работающий
+Docker daemon. Те же suites запускаются отдельным integration job в GitHub Actions.
+
 ## Bash Task Executor
 
 `LqExecutor` собирается из интерфейсов: backend очереди + стратегия выполнения задач.

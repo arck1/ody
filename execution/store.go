@@ -21,6 +21,7 @@ type Store interface {
 	Retry(context.Context, uuid.UUID, uuid.UUID, string, time.Time) error
 	Fail(context.Context, uuid.UUID, uuid.UUID, string) error
 	CancelExecution(context.Context, uuid.UUID, string) error
+	RestartExecution(context.Context, uuid.UUID, time.Time) (Execution, error)
 	Events(context.Context, uuid.UUID) ([]Event, error)
 
 	CreatePipelineRun(context.Context, CreatePipelineRun) (PipelineRun, error)

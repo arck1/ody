@@ -277,6 +277,34 @@ func (s *MemoryStore) CancelExecution(_ context.Context, id uuid.UUID, reason st
 	return nil
 }
 
+func (s *MemoryStore) RestartExecution(_ context.Context, id uuid.UUID, availableAt time.Time) (Execution, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := s.executions[id]
+	if !ok {
+		return Execution{}, ErrNotFound
+	}
+	if item.Status == StatusPending || item.Status == StatusRetry || item.Status == StatusRunning {
+		return Execution{}, ErrActive
+	}
+	if availableAt.IsZero() {
+		availableAt = s.now()
+	}
+	item.Status, item.Attempt, item.AvailableAt = StatusPending, 0, availableAt
+	item.Output, item.LastError, item.StartedAt, item.FinishedAt = nil, "", nil, nil
+	item.LeaseToken, item.LeaseOwner, item.LeaseUntil = uuid.Nil, "", time.Time{}
+	s.executions[id] = item
+	s.appendEvent(item, EventRestarted, "")
+	if item.PipelineRunID != nil {
+		run, exists := s.runs[*item.PipelineRunID]
+		if exists {
+			run.Status, run.Error, run.FinishedAt, run.UpdatedAt = RunRunning, "", nil, s.now()
+			s.runs[run.ID] = run
+		}
+	}
+	return cloneExecution(item), nil
+}
+
 func (s *MemoryStore) Events(_ context.Context, id uuid.UUID) ([]Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

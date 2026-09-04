@@ -266,6 +266,30 @@ func TestPersistentPipelineIntegration(t *testing.T) {
 	if result != "result:42" {
 		t.Fatalf("result = %q", result)
 	}
+	executions, err := store.ListRunExecutions(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lastExecution execution.Execution
+	for _, item := range executions {
+		if item.NodeKey == "stringify" {
+			lastExecution = item
+		}
+	}
+	restarted, err := store.RestartExecution(context.Background(), lastExecution.ID, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restarted.Status != execution.StatusPending || restarted.Attempt != 0 || restarted.Output != nil {
+		t.Fatalf("unexpected restarted execution: %+v", restarted)
+	}
+	current, err = store.GetPipelineRun(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Status != execution.RunRunning {
+		t.Fatalf("pipeline was not reopened: %s", current.Status)
+	}
 }
 
 func eventuallyClaimOne(t *testing.T, q *queue.PostgresQueue, tasks []string, timeout time.Duration) queue.Claimed {

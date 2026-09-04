@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Schedulor Operations</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0d1117;--panel:#161b22;--line:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;--ok:#3fb950;--bad:#f85149}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px ui-monospace,SFMono-Regular,Menlo,monospace}
+    header{padding:24px 4vw;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}h1{font-size:20px;margin:0}button,select,input{background:var(--panel);border:1px solid var(--line);color:var(--text);padding:8px 10px;border-radius:6px}button{cursor:pointer}button:hover{border-color:var(--accent)}main{padding:24px 4vw}.tabs{display:flex;gap:8px;margin-bottom:16px}.active{border-color:var(--accent);color:var(--accent)}.toolbar{display:flex;gap:8px;margin-bottom:12px}table{width:100%;border-collapse:collapse;background:var(--panel)}th,td{padding:10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted)}tr{cursor:pointer}tr:hover{background:#1f2630}.status-succeeded{color:var(--ok)}.status-failed,.status-cancelled{color:var(--bad)}dialog{width:min(900px,94vw);max-height:90vh;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px}pre{white-space:pre-wrap;overflow:auto}.actions{display:flex;gap:8px;justify-content:flex-end}.muted{color:var(--muted)}
+  </style>
+</head>
+<body><header><h1>Schedulor Operations</h1><span class="muted" id="health">durable execution store</span></header>
+<main><div class="tabs"><button id="tasksTab" class="active">Задачи</button><button id="pipelinesTab">Пайплайны</button></div>
+<div class="toolbar"><select id="status"><option value="">Все статусы</option></select><input id="name" placeholder="Имя задачи"><button id="refresh">Обновить</button></div>
+<table><thead id="head"></thead><tbody id="tbody"></tbody></table></main>
+<dialog id="detail"><div class="actions"><button id="restart">Перезапустить</button><button onclick="detail.close()">Закрыть</button></div><pre id="content"></pre></dialog>
+<script>
+const $=id=>document.getElementById(id);let mode='tasks',selected=null;
+const esc=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const taskStatuses=['pending','running','retry','succeeded','failed','cancelled'],runStatuses=['pending','running','succeeded','failed','cancelled'];
+function options(){const xs=mode==='tasks'?taskStatuses:runStatuses;$('status').innerHTML='<option value="">Все статусы</option>'+xs.map(x=>`<option>${x}</option>`).join('');$('name').style.display=mode==='tasks'?'block':'none'}
+async function request(url,init){const r=await fetch(url,init);const body=await r.json();if(!r.ok)throw Error(body.error||r.statusText);return body}
+async function load(){try{const status=$('status').value,name=$('name').value;const q=new URLSearchParams();if(status)q.append('status',status);if(name&&mode==='tasks')q.set('task_name',name);const data=await request(`/api/${mode}?${q}`);render(data)}catch(e){alert(e.message)}}
+function render(items){if(mode==='tasks'){$('thead').innerHTML='<tr><th>Создана</th><th>Задача</th><th>Статус</th><th>Попытка</th><th>ID</th></tr>';$('tbody').innerHTML=items.map(x=>`<tr data-id="${esc(x.id)}"><td>${new Date(x.created_at).toLocaleString()}</td><td>${esc(x.task_name)} v${esc(x.task_version)}</td><td class="status-${esc(x.status)}">${esc(x.status)}</td><td>${esc(x.attempt)}/${esc(x.max_attempts)}</td><td>${esc(x.id)}</td></tr>`).join('')}else{$('thead').innerHTML='<tr><th>Создан</th><th>Пайплайн</th><th>Статус</th><th>ID</th></tr>';$('tbody').innerHTML=items.map(x=>`<tr data-id="${esc(x.id)}"><td>${new Date(x.created_at).toLocaleString()}</td><td>${esc(x.pipeline_name)} v${esc(x.pipeline_version)}</td><td class="status-${esc(x.status)}">${esc(x.status)}</td><td>${esc(x.id)}</td></tr>`).join('')}document.querySelectorAll('tbody tr').forEach(x=>x.onclick=()=>show(x.dataset.id))}
+async function show(id){try{selected=id;const data=await request(`/api/${mode}/${id}`);$('content').textContent=JSON.stringify(data,null,2);$('restart').style.display=mode==='tasks'?'block':'none';$('detail').showModal()}catch(e){alert(e.message)}}
+$('restart').onclick=async()=>{if(!confirm('Перезапустить задачу?'))return;try{await request(`/api/tasks/${selected}/restart`,{method:'POST'});$('detail').close();load()}catch(e){alert(e.message)}};
+for(const tab of ['tasks','pipelines'])$(tab+'Tab').onclick=()=>{mode=tab;document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active'));$(tab+'Tab').classList.add('active');options();load()};$('refresh').onclick=load;options();load();setInterval(load,10000);
+</script></body></html>

@@ -314,6 +314,44 @@ func (s *Store) CancelExecution(ctx context.Context, id uuid.UUID, reason string
 	return tx.Commit()
 }
 
+func (s *Store) RestartExecution(ctx context.Context, id uuid.UUID, availableAt time.Time) (execution.Execution, error) {
+	if availableAt.IsZero() {
+		availableAt = time.Now().UTC()
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return execution.Execution{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	item, err := scanExecution(tx.QueryRowContext(ctx, `UPDATE task_executions SET
+        status='pending',attempt=0,available_at=$2,output=NULL,last_error='',started_at=NULL,finished_at=NULL,
+        lease_owner='',lease_token=NULL,lease_until=NULL
+        WHERE id=$1 AND status IN ('succeeded','failed','cancelled') RETURNING `+executionColumns, id, availableAt))
+	if errors.Is(err, sql.ErrNoRows) {
+		var status execution.Status
+		lookupErr := tx.QueryRowContext(ctx, `SELECT status FROM task_executions WHERE id=$1`, id).Scan(&status)
+		if errors.Is(lookupErr, sql.ErrNoRows) {
+			return execution.Execution{}, execution.ErrNotFound
+		}
+		if lookupErr != nil {
+			return execution.Execution{}, lookupErr
+		}
+		return execution.Execution{}, execution.ErrActive
+	}
+	if err != nil {
+		return execution.Execution{}, err
+	}
+	if err = s.insertEvent(ctx, tx, item, execution.EventRestarted, ""); err != nil {
+		return execution.Execution{}, err
+	}
+	if item.PipelineRunID != nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE pipeline_runs SET status='running',error='',updated_at=now(),finished_at=NULL WHERE id=$1`, item.PipelineRunID); err != nil {
+			return execution.Execution{}, err
+		}
+	}
+	return item, tx.Commit()
+}
+
 func (s *Store) Events(ctx context.Context, id uuid.UUID) ([]execution.Event, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id,execution_id,event_type,attempt,error,created_at FROM execution_events WHERE execution_id=$1 ORDER BY created_at,id`, id)
 	if err != nil {

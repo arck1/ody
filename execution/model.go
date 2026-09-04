@@ -33,29 +33,30 @@ const (
 var (
 	ErrNotFound  = errors.New("execution not found")
 	ErrLeaseLost = errors.New("execution lease lost")
+	ErrActive    = errors.New("execution is active")
 )
 
 // Execution is one durable invocation of a task definition.
 type Execution struct {
-	ID             uuid.UUID
-	TaskName       string
-	TaskVersion    int
-	Input          json.RawMessage
-	Output         json.RawMessage
-	Status         Status
-	Attempt        int
-	MaxAttempts    int
-	AvailableAt    time.Time
-	LeaseOwner     string
-	LeaseToken     uuid.UUID
-	LeaseUntil     time.Time
-	LastError      string
-	IdempotencyKey string
-	PipelineRunID  *uuid.UUID
-	NodeKey        string
-	CreatedAt      time.Time
-	StartedAt      *time.Time
-	FinishedAt     *time.Time
+	ID             uuid.UUID       `json:"id"`
+	TaskName       string          `json:"task_name"`
+	TaskVersion    int             `json:"task_version"`
+	Input          json.RawMessage `json:"input"`
+	Output         json.RawMessage `json:"output,omitempty"`
+	Status         Status          `json:"status"`
+	Attempt        int             `json:"attempt"`
+	MaxAttempts    int             `json:"max_attempts"`
+	AvailableAt    time.Time       `json:"available_at"`
+	LeaseOwner     string          `json:"lease_owner,omitempty"`
+	LeaseToken     uuid.UUID       `json:"lease_token,omitempty"`
+	LeaseUntil     time.Time       `json:"lease_until,omitempty"`
+	LastError      string          `json:"last_error,omitempty"`
+	IdempotencyKey string          `json:"idempotency_key,omitempty"`
+	PipelineRunID  *uuid.UUID      `json:"pipeline_run_id,omitempty"`
+	NodeKey        string          `json:"node_key,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
+	StartedAt      *time.Time      `json:"started_at,omitempty"`
+	FinishedAt     *time.Time      `json:"finished_at,omitempty"`
 }
 
 type CreateExecution struct {
@@ -78,15 +79,15 @@ type ListFilter struct {
 
 // PipelineRun tracks one durable pipeline invocation.
 type PipelineRun struct {
-	ID              uuid.UUID
-	PipelineName    string
-	PipelineVersion int
-	Input           json.RawMessage
-	Status          RunStatus
-	Error           string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	FinishedAt      *time.Time
+	ID              uuid.UUID       `json:"id"`
+	PipelineName    string          `json:"pipeline_name"`
+	PipelineVersion int             `json:"pipeline_version"`
+	Input           json.RawMessage `json:"input"`
+	Status          RunStatus       `json:"status"`
+	Error           string          `json:"error,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+	FinishedAt      *time.Time      `json:"finished_at,omitempty"`
 }
 
 type CreatePipelineRun struct {
@@ -104,14 +105,15 @@ const (
 	EventSucceeded EventType = "succeeded"
 	EventFailed    EventType = "failed"
 	EventCancelled EventType = "cancelled"
+	EventRestarted EventType = "restarted"
 )
 
 // Event is an append-only execution transition record.
 type Event struct {
-	ID          uuid.UUID
-	ExecutionID uuid.UUID
-	Type        EventType
-	Attempt     int
-	Error       string
-	CreatedAt   time.Time
+	ID          uuid.UUID `json:"id"`
+	ExecutionID uuid.UUID `json:"execution_id"`
+	Type        EventType `json:"type"`
+	Attempt     int       `json:"attempt"`
+	Error       string    `json:"error,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }

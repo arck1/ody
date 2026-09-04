@@ -275,6 +275,59 @@ if err = store.Migrate(ctx); err != nil {
 Таблицы `task_executions`, `execution_events` и `pipeline_runs` содержат входы, результаты,
 попытки, ошибки, lease и полную историю переходов.
 
+## Monitoring, Prometheus и управление
+
+Пакет `monitoring` предоставляет транспорт-независимые интерфейсы `TaskReader`,
+`PipelineReader`, `Controller` и объединённый `API`. Базовый `Service` работает с любым
+`execution.Store`. Перезапуск разрешён только для `succeeded`, `failed` и `cancelled` задач:
+он сохраняет ID и историю, добавляет событие `restarted`, сбрасывает attempt/result/lease и
+возвращает задачу в `pending`. Связанный pipeline снова становится `running`.
+
+Prometheus observer и store collector подключаются к тому же registry:
+
+```go
+promRegistry := prometheus.NewRegistry()
+metrics, err := monitoringprom.New(promRegistry, store)
+if err != nil {
+  return err
+}
+
+runner, err := worker.New(store, tasks, engine, metrics, workerOptions)
+metricsHandler := promhttp.HandlerFor(promRegistry, promhttp.HandlerOpts{})
+```
+
+Доступные метрики:
+
+- `schedulor_worker_task_transitions_total{task,status}`;
+- `schedulor_worker_task_duration_seconds{task,status}`;
+- `schedulor_worker_observer_errors_total{task}`;
+- `schedulor_store_task_executions{task,status}`;
+- `schedulor_store_pipeline_runs{pipeline,status}`;
+- `schedulor_store_scrape_error`.
+
+Operational CLI использует PostgreSQL execution Store:
+
+```bash
+export SCHEDULOR_DB_DSN='postgres://schedulor:schedulor@localhost:5432/schedulor?sslmode=disable'
+
+go run ./cmd/schedulor-admin tasks -status failed -limit 50
+go run ./cmd/schedulor-admin task '<execution-uuid>'
+go run ./cmd/schedulor-admin pipelines running,failed
+go run ./cmd/schedulor-admin pipeline '<pipeline-uuid>'
+go run ./cmd/schedulor-admin restart '<execution-uuid>'
+go run ./cmd/schedulor-admin cancel '<execution-uuid>' 'operator reason'
+```
+
+Web UI и JSON API запускаются отдельно от worker:
+
+```bash
+go run ./cmd/schedulor-admin --addr 127.0.0.1:8081 serve
+```
+
+Dashboard доступен на `http://127.0.0.1:8081/`, метрики — на `/metrics`, JSON API — под
+`/api/tasks` и `/api/pipelines`. По умолчанию сервер слушает только loopback. При публикации
+наружу добавьте authentication/TLS на reverse proxy и не открывайте operator endpoints напрямую.
+
 ### Functional tests
 
 Функциональные сценарии используют только публичный API и MemoryStore. Каждый сценарий

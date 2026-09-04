@@ -17,8 +17,8 @@ go mod tidy
 semantic version. В примерах используются imports `schedulor/task`, `schedulor/execution`,
 `schedulor/execution/postgres`, `schedulor/pipeline` и `schedulor/worker`.
 
-Нужны версия Go из `go.mod` и PostgreSQL для durable production Store. `execution.MemoryStore`
-подходит для тестов и локальных однопроцессных сценариев.
+Нужны версия Go из `go.mod` и PostgreSQL либо Redis для durable production Store.
+`execution.MemoryStore` подходит для тестов и локальных однопроцессных сценариев.
 
 ## 1. Подготовьте PostgreSQL
 
@@ -48,6 +48,21 @@ if err = store.Migrate(ctx); err != nil {
 
 `Migrate` идемпотентно создаёт `task_executions`, `execution_events`, `pipeline_runs`, индексы и
 ограничения. В production миграцию можно выполнять отдельным deploy step.
+
+Эквивалентный Redis Store не требует миграции:
+
+```go
+client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:6379"})
+defer client.Close()
+
+store, err := executionredis.New(client, executionredis.Options{
+    Prefix: "myapp:{execution}:",
+})
+```
+
+Redis хранит executions, события и pipeline, а sorted sets используются как очередь delayed-задач
+и lease. Для Redis Cluster все ключи Store должны оставаться в одном hash slot, поэтому prefix
+должен содержать общий hash tag, например `{execution}`.
 
 ## 3. Опишите задачу и handler
 

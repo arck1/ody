@@ -63,6 +63,17 @@ go run ./cmd/schedulor-admin restart '<execution-uuid>'
 go run ./cmd/schedulor-admin cancel '<execution-uuid>' 'requested by customer'
 ```
 
+CLI и web UI могут работать с Redis без изменения команд:
+
+```bash
+export SCHEDULOR_STORE=redis
+export SCHEDULOR_REDIS_URL='redis://127.0.0.1:6379/0'
+export SCHEDULOR_REDIS_PREFIX='myapp:{execution}:'
+
+go run ./cmd/schedulor-admin tasks -status running
+go run ./cmd/schedulor-admin serve
+```
+
 Вывод CLI — JSON, поэтому его можно передавать в `jq`.
 
 ## Web UI и JSON API
@@ -83,12 +94,13 @@ Web server по умолчанию слушает loopback и не содерж�
 
 ## Production checklist
 
-- применяйте PostgreSQL migration до запуска worker;
-- настройте pool `*sql.DB` и лимиты PostgreSQL;
+- применяйте PostgreSQL migration до запуска worker либо выделите Redis DB/prefix;
+- настройте pool `*sql.DB` или Redis client pool и timeout;
+- для Redis включите `noeviction`, persistence, replication и backup;
 - обеспечьте graceful shutdown и context-aware handlers;
 - используйте идемпотентные side effects;
 - оставляйте старые task/pipeline versions зарегистрированными до завершения старых записей;
 - собирайте `/metrics` и alert на рост `failed`, `retry`, `scrape_error`;
 - ограничьте доступ к operator API;
 - периодически определяйте retention/архивацию terminal executions и events на уровне приложения;
-- запускайте `make test-functional-integration` с реальным PostgreSQL перед релизом.
+- запускайте `make test-functional-integration` с реальными PostgreSQL и Redis перед релизом.

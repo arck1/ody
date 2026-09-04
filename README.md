@@ -2,7 +2,7 @@
 
 Schedulor — модульная Go-библиотека для типизированных фоновых задач и durable pipeline.
 Выполнения, входы, результаты, попытки, lease и история переходов сохраняются через
-`execution.Store`; базовые реализации — in-memory и PostgreSQL.
+`execution.Store`; базовые реализации — in-memory, PostgreSQL и Redis.
 
 ## Возможности
 
@@ -11,7 +11,7 @@ Schedulor — модульная Go-библиотека для типизиро
 - persistent pipeline с `Start`, `Then`, fan-out и `Join2`;
 - standalone-запуск и опциональная интеграция с Uber Fx;
 - просмотр, отмена и перезапуск выполнений через Go API, CLI и web UI;
-- Prometheus-метрики и функциональные тесты с настоящим PostgreSQL.
+- Prometheus-метрики и функциональные тесты с настоящими PostgreSQL и Redis.
 
 ## Быстрый пример
 
@@ -36,9 +36,9 @@ created, err := sendEmail.Enqueue(ctx, store, EmailInput{To: "user@example.com"}
 err = runner.Run(ctx)
 ```
 
-В production используйте `execution/postgres.Store`, вызовите `Migrate` при развёртывании и
-передавайте один Store в worker, pipeline engine и monitoring service. Handler должен быть
-идемпотентным: модель доставки at-least-once.
+В production используйте `execution/postgres.Store` или `execution/redis.Store` и передавайте один
+Store в worker, pipeline engine и monitoring service. PostgreSQL требует вызова `Migrate`; Redis
+не требует отдельной схемы. Handler должен быть идемпотентным: модель доставки at-least-once.
 
 ## Документация
 
@@ -53,7 +53,7 @@ err = runner.Run(ctx)
 
 ```bash
 make check
-make test-functional-integration # нужен Docker; поднимает PostgreSQL через Testcontainers
+make test-functional-integration # нужен Docker; поднимает PostgreSQL и Redis через Testcontainers
 ```
 
 Версия `golangci-lint` зафиксирована и устанавливается локально командой `make install-lint`.
@@ -64,6 +64,8 @@ make test-functional-integration # нужен Docker; поднимает Postgre
 export SCHEDULOR_DB_DSN='postgres://schedulor:schedulor@localhost:5432/schedulor?sslmode=disable'
 go run ./cmd/schedulor-admin --addr 127.0.0.1:8081 serve
 ```
+
+Для Redis: `SCHEDULOR_STORE=redis SCHEDULOR_REDIS_URL=redis://127.0.0.1:6379/0`.
 
 Dashboard будет доступен на `http://127.0.0.1:8081/`, метрики — на `/metrics`, JSON API — под
 `/api/tasks` и `/api/pipelines`. Перед публикацией наружу добавьте authentication и TLS на reverse

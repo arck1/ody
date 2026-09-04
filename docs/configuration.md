@@ -42,6 +42,36 @@ worker.Options{
 задержки и пауз runtime. Timeout задачи и lease — разные вещи: timeout ограничивает handler, lease
 защищает владение записью.
 
+## Redis Store
+
+```go
+client := redis.NewClient(&redis.Options{
+    Addr: "127.0.0.1:6379",
+    DB:   0,
+})
+
+store, err := executionredis.New(client, executionredis.Options{
+    Prefix: "billing:{execution}:",
+})
+```
+
+Приложение владеет клиентом и закрывает его самостоятельно. Redis Store реализует полный контракт
+`execution.Store`: историю и результаты, idempotency, pipeline, delayed queue, claim, lease,
+heartbeat, retry, отмену и restart. Переходы одной записи атомарны через Redis transactions;
+временные решения используют серверное время Redis.
+
+Контракт разделён на `execution.Queue`, `execution.ExecutionRepository` и
+`execution.PipelineRepository`; полный `execution.Store` объединяет их. Это позволяет прикладным
+компонентам принимать только нужную часть API, при этом стандартные Store реализуют все три части.
+
+Prefix по умолчанию — `schedulor:{execution}:`. Для Redis Cluster сохраняйте общий hash tag во
+всех ключах одного Store. Разным окружениям и приложениям задавайте разные prefix.
+
+Для production Redis используйте `maxmemory-policy noeviction`: частичное вытеснение execution,
+индекса или event list нарушает целостность истории. Настройте AOF/RDB, replication и backup в
+соответствии с допустимой потерей данных. Пароль/TLS задаются в конфигурации `go-redis`; библиотека
+использует переданный `redis.UniversalClient`.
+
 ## Task options
 
 ```go
@@ -75,5 +105,7 @@ Worker сообщает переходы выполнения через инт�
 Operational CLI:
 
 - `SCHEDULOR_DB_DSN` — PostgreSQL DSN;
+- `SCHEDULOR_STORE` — `postgres` (default) или `redis`;
+- `SCHEDULOR_REDIS_URL` — Redis URL, default `redis://127.0.0.1:6379/0`;
+- `SCHEDULOR_REDIS_PREFIX` — namespace ключей Redis;
 - `SCHEDULOR_ADMIN_ADDR` — адрес web server, default `127.0.0.1:8081`.
-

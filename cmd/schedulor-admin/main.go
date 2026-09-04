@@ -18,9 +18,11 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	prom "github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	redislib "github.com/redis/go-redis/v9"
 
 	"schedulor/execution"
 	executionpostgres "schedulor/execution/postgres"
+	executionredis "schedulor/execution/redis"
 	"schedulor/monitoring"
 	"schedulor/monitoring/httpui"
 	monitoringprom "schedulor/monitoring/prometheus"
@@ -35,36 +37,70 @@ func main() {
 
 func run(args []string) error {
 	global := flag.NewFlagSet("schedulor-admin", flag.ContinueOnError)
+	backend := global.String("store", env("SCHEDULOR_STORE", "postgres"), "execution store: postgres|redis")
 	dsn := global.String("db-dsn", env("SCHEDULOR_DB_DSN", ""), "PostgreSQL DSN")
+	redisURL := global.String("redis-url", env("SCHEDULOR_REDIS_URL", "redis://127.0.0.1:6379/0"), "Redis URL")
+	redisPrefix := global.String("redis-prefix", env("SCHEDULOR_REDIS_PREFIX", ""), "Redis key prefix")
 	addr := global.String("addr", env("SCHEDULOR_ADMIN_ADDR", "127.0.0.1:8081"), "HTTP listen address")
 	if err := global.Parse(args); err != nil {
 		return err
-	}
-	if *dsn == "" {
-		return errors.New("SCHEDULOR_DB_DSN or --db-dsn is required")
 	}
 	remaining := global.Args()
 	if len(remaining) == 0 {
 		return errors.New("command is required: tasks|task|pipelines|pipeline|restart|cancel|serve")
 	}
-	db, err := sql.Open("pgx", *dsn)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = db.Close() }()
 	ctx := context.Background()
-	if err = db.PingContext(ctx); err != nil {
-		return fmt.Errorf("connect postgres: %w", err)
-	}
-	store, err := executionpostgres.New(db)
+	store, closeStore, err := openStore(ctx, *backend, *dsn, *redisURL, *redisPrefix)
 	if err != nil {
 		return err
 	}
+	defer closeStore()
 	service, err := monitoring.New(store)
 	if err != nil {
 		return err
 	}
 	return command(ctx, service, store, *addr, remaining[0], remaining[1:])
+}
+
+func openStore(ctx context.Context, backend, dsn, redisURL, redisPrefix string) (execution.Store, func(), error) {
+	switch backend {
+	case "postgres":
+		if dsn == "" {
+			return nil, func() {}, errors.New("SCHEDULOR_DB_DSN or --db-dsn is required for postgres")
+		}
+		db, err := sql.Open("pgx", dsn)
+		if err != nil {
+			return nil, func() {}, err
+		}
+		if err = db.PingContext(ctx); err != nil {
+			_ = db.Close()
+			return nil, func() {}, fmt.Errorf("connect postgres: %w", err)
+		}
+		store, err := executionpostgres.New(db)
+		if err != nil {
+			_ = db.Close()
+			return nil, func() {}, err
+		}
+		return store, func() { _ = db.Close() }, nil
+	case "redis":
+		options, err := redislib.ParseURL(redisURL)
+		if err != nil {
+			return nil, func() {}, fmt.Errorf("parse redis URL: %w", err)
+		}
+		client := redislib.NewClient(options)
+		if err = client.Ping(ctx).Err(); err != nil {
+			_ = client.Close()
+			return nil, func() {}, fmt.Errorf("connect redis: %w", err)
+		}
+		store, err := executionredis.New(client, executionredis.Options{Prefix: redisPrefix})
+		if err != nil {
+			_ = client.Close()
+			return nil, func() {}, err
+		}
+		return store, func() { _ = client.Close() }, nil
+	default:
+		return nil, func() {}, fmt.Errorf("unsupported execution store %q", backend)
+	}
 }
 
 func command(ctx context.Context, service *monitoring.Service, store execution.Store, addr, name string, args []string) error {

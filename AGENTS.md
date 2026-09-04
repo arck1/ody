@@ -6,8 +6,8 @@ This file is the source of truth for coding agents working in this repository. `
 ## Project purpose
 
 Schedulor is a Go library for durable, typed background jobs and persistent DAG pipelines. It
-supports standalone construction and optional Uber Fx lifecycle integration. PostgreSQL is the
-production Store; the memory Store supports tests and local scenarios.
+supports standalone construction and optional Uber Fx lifecycle integration. PostgreSQL and Redis
+are production Stores; the memory Store supports tests and local scenarios.
 
 The module path is `schedulor`. The required Go version is declared in `go.mod`.
 
@@ -25,7 +25,7 @@ task.Definition[I,O] + typed handler
               ▼
        execution.Store ◄──── pipeline.Engine
               │                    │
-       Memory / PostgreSQL     persistent DAG
+    Memory / PostgreSQL / Redis    persistent DAG
               │
               ▼
  monitoring.Service ──► CLI / JSON API / Web UI / store metrics
@@ -35,12 +35,18 @@ task.Definition[I,O] + typed handler
 attempts, leases, events, and pipeline runs. Infrastructure boundaries use JSON; task handlers and
 pipeline mappers provide typed conversion.
 
+The full Store embeds three capability interfaces: `execution.Queue`,
+`execution.ExecutionRepository`, and `execution.PipelineRepository`. Prefer the narrowest capability
+when a new component does not need the full Store.
+
 ## Package map
 
 - `task`: generic definitions, handlers, modules, registry, retry policies, permanent failures,
   delayed retries, and enqueue.
 - `execution`: execution/run/event models and the persistence Store contract.
 - `execution/postgres`: PostgreSQL Store and embedded idempotent migration.
+- `execution/redis`: Redis Store; sorted-set delivery queue, optimistic transactions, leases,
+  history, idempotency, and pipeline persistence.
 - `pipeline`: typed DAG definition (`Start`, `Then`, `Join2`), registry, durable engine,
   reconciliation, cancellation, inspection, and output decoding.
 - `worker`: standalone concurrent worker with polling, timeout, lease heartbeat, retry, result
@@ -50,7 +56,7 @@ pipeline mappers provide typed conversion.
 - `monitoring/prometheus`: worker observer metrics and persisted-state collector.
 - `monitoring/httpui`: embedded operator dashboard and JSON API.
 - `cmd/schedulor-admin`: PostgreSQL-backed operational CLI and web server.
-- `functional`: public-API behavior suites; integration-tagged suites use real PostgreSQL.
+- `functional`: public-API behavior suites; integration-tagged suites use real PostgreSQL and Redis.
 
 The root package only contains the optional Fx application assembly helper.
 
@@ -103,15 +109,17 @@ errors, inputs, and outputs are not.
 - `worker.Run` blocks until context cancellation and drains polling goroutines. Handlers must honor
   their context because Go cannot forcibly stop one that ignores cancellation.
 - Long-lived components must honor cancellation promptly and close owned resources.
-- Constructors receiving `*sql.DB` do not own it; the application closes the database.
+- Constructors receiving database or Redis clients do not own them; the application closes them.
 - Observability depends on `worker.Observer`, not a concrete logger.
 
 ## Database changes
 
-- The schema is `execution/postgres/schema.sql` and is embedded by the Store.
+- The PostgreSQL schema is `execution/postgres/schema.sql` and is embedded by the Store.
 - Preserve constraints and indexes enforcing idempotency and pipeline-node uniqueness.
 - Migrations must be safe to apply repeatedly and need integration coverage.
 - Dynamic SQL may select only known fragments; all values remain parameterized.
+- Redis mutations use WATCH transactions, server time for queue/lease decisions, and one common
+  Cluster hash tag in the key prefix.
 
 ## Tests and quality gates
 
@@ -119,7 +127,7 @@ errors, inputs, and outputs are not.
 make fmt
 make lint
 make check
-make test-functional-integration # real PostgreSQL via Testcontainers
+make test-functional-integration # real PostgreSQL and Redis via Testcontainers
 make test-integration
 ```
 
@@ -148,6 +156,6 @@ GOLANGCI_LINT_CACHE="$PWD/bin/golangci-cache" \
 
 ## Known limitations
 
-- The production Store is PostgreSQL; other durable Store implementations are not included.
+- Redis list operations currently read the selected sorted-set index and filter records client-side.
 - The embedded web UI is an operator tool, not a multi-tenant control plane.
 - Pipeline construction provides single-predecessor `Then` and two-input `Join2`.

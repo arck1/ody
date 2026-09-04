@@ -11,7 +11,7 @@ LINT_ENV := $(GO_ENV) GOLANGCI_LINT_CACHE=$(TOOLS_DIR)/golangci-cache
 help:
 	@echo "Targets:"
 	@echo "  deps-test         Install integration test dependencies"
-	@echo "  up                Start local PostgreSQL"
+	@echo "  up                Start local PostgreSQL and Redis"
 	@echo "  down              Stop local dependencies"
 	@echo "  restart           Restart local dependencies"
 	@echo "  logs              Tail dependency logs"
@@ -19,7 +19,7 @@ help:
 	@echo "  test              Run unit tests"
 	@echo "  test-unit         Run unit tests"
 	@echo "  test-integration  Run integration tests (requires Docker)"
-	@echo "  test-functional-integration  Run PostgreSQL functional suites"
+	@echo "  test-functional-integration  Run PostgreSQL/Redis functional suites"
 	@echo "  run-admin         Run operational CLI/web server"
 	@echo "  install-lint      Install the pinned golangci-lint version"
 	@echo "  fmt               Format Go files with golangci-lint"

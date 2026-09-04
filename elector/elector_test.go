@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/suite"
 )
 
 type sqlConnector struct {
@@ -25,34 +27,32 @@ func (c sqlConnector) GetConnect(ctx context.Context) (*sql.DB, error) {
 	return c.db, nil
 }
 
-func TestStaticLeaderElector(t *testing.T) {
+type LeaderElectorSuite struct{ suite.Suite }
+
+func TestLeaderElectorSuite(t *testing.T) {
+	suite.Run(t, new(LeaderElectorSuite))
+}
+
+func (s *LeaderElectorSuite) TestStaticLeaderElector() {
 	opts := Options{LeaderKey: "k", LeaderId: "id", LeaderTTL: 5 * time.Second}
 	e := NewStaticLeaderElector(opts)
 
-	if err := e.IsLeader(context.Background()); err != nil {
-		t.Fatalf("IsLeader error: %v", err)
-	}
-	if e.GetLeaderKey() != "k" {
-		t.Fatalf("unexpected key: %s", e.GetLeaderKey())
-	}
-	if e.GetLeaderId() != "id" {
-		t.Fatalf("unexpected id: %s", e.GetLeaderId())
-	}
-	if e.GetLeaderTTL() != 5*time.Second {
-		t.Fatalf("unexpected ttl: %v", e.GetLeaderTTL())
-	}
+	s.Require().NoError(e.IsLeader(context.Background()), "IsLeader should return nil")
+	s.Equal("k", e.GetLeaderKey(), "Leader key should be k")
+	s.Equal("id", e.GetLeaderId(), "Leader id should be id")
+	s.Equal(5*time.Second, e.GetLeaderTTL(), "Leader TTL should be 5s")
 }
 
-func TestPgLeaderElectorIsLeaderSuccess(t *testing.T) {
-	db := newStubDB(t, func(query string, args []driver.NamedValue) (driver.Result, error) {
+func (s *LeaderElectorSuite) TestPgLeaderElectorIsLeaderSuccess() {
+	db := s.newStubDB(func(query string, args []driver.NamedValue) (driver.Result, error) {
 		if !strings.Contains(query, "INSERT INTO lq_schedule_leader") {
-			t.Fatalf("unexpected query: %s", query)
+			s.Failf("unexpected query: %s", query)
 		}
 		if len(args) != 4 {
-			t.Fatalf("unexpected args count: %d", len(args))
+			s.Fail("unexpected args count", len(args))
 		}
 		if args[0].Value != "leader_key" || args[1].Value != "leader_id" {
-			t.Fatalf("unexpected args values: %+v", args)
+			s.Fail("unexpected args values", args)
 		}
 		return driver.RowsAffected(1), nil
 	})
@@ -64,13 +64,11 @@ func TestPgLeaderElectorIsLeaderSuccess(t *testing.T) {
 		LeaderTTL: time.Second,
 	})
 
-	if err := e.IsLeader(context.Background()); err != nil {
-		t.Fatalf("expected leader, got error: %v", err)
-	}
+	s.Require().NoError(e.IsLeader(context.Background()), "IsLeader should return nil")
 }
 
-func TestPgLeaderElectorIsLeaderNotLeader(t *testing.T) {
-	db := newStubDB(t, func(query string, args []driver.NamedValue) (driver.Result, error) {
+func (s *LeaderElectorSuite) TestPgLeaderElectorIsLeaderNotLeader() {
+	db := s.newStubDB(func(query string, args []driver.NamedValue) (driver.Result, error) {
 		return driver.RowsAffected(0), nil
 	})
 	defer db.Close()
@@ -83,11 +81,11 @@ func TestPgLeaderElectorIsLeaderNotLeader(t *testing.T) {
 
 	err := e.IsLeader(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "not leader") {
-		t.Fatalf("expected not leader error, got: %v", err)
+		s.Fail("expected not leader error", err)
 	}
 }
 
-func TestPgLeaderElectorConnectionError(t *testing.T) {
+func (s *LeaderElectorSuite) TestPgLeaderElectorConnectionError() {
 	e := NewPgLeaderElector(sqlConnector{err: errors.New("db down")}, Options{
 		LeaderKey: "leader_key",
 		LeaderId:  "leader_id",
@@ -96,12 +94,12 @@ func TestPgLeaderElectorConnectionError(t *testing.T) {
 
 	err := e.IsLeader(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "db down") {
-		t.Fatalf("expected db error, got: %v", err)
+		s.Fail("expected db error, got", err)
 	}
 }
 
-func TestPgLeaderElectorExecError(t *testing.T) {
-	db := newStubDB(t, func(query string, args []driver.NamedValue) (driver.Result, error) {
+func (s *LeaderElectorSuite) TestPgLeaderElectorExecError() {
+	db := s.newStubDB(func(query string, args []driver.NamedValue) (driver.Result, error) {
 		return nil, errors.New("exec failed")
 	})
 	defer db.Close()
@@ -114,17 +112,17 @@ func TestPgLeaderElectorExecError(t *testing.T) {
 
 	err := e.IsLeader(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "exec failed") {
-		t.Fatalf("expected exec error, got: %v", err)
+		s.Fail("expected exec error, got", err)
 	}
 }
 
-func newStubDB(t *testing.T, execFn func(query string, args []driver.NamedValue) (driver.Result, error)) *sql.DB {
-	t.Helper()
+func (s *LeaderElectorSuite) newStubDB(execFn func(query string, args []driver.NamedValue) (driver.Result, error)) *sql.DB {
+	s.T().Helper()
 	name := fmt.Sprintf("elector_stub_%d", stubDriverCounter.Add(1))
 	sql.Register(name, stubDriver{execFn: execFn})
 	db, err := sql.Open(name, "")
 	if err != nil {
-		t.Fatalf("sql open: %v", err)
+		s.Fail("sql open", err)
 	}
 	return db
 }

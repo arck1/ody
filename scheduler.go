@@ -4,9 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"schedulor/queue"
 	"sync"
 	"time"
+
+	"schedulor/queue"
 
 	"github.com/google/uuid"
 	"github.com/samber/lo"
@@ -67,7 +68,7 @@ func NewLqScheduler(
 	if err != nil {
 		return nil, fmt.Errorf("create local scheduler: %w", err)
 	}
-	leaderElector := settings.LqSchedulerOptions.LeaderElector
+	leaderElector := settings.LeaderElector
 	schedulerOptions := []gocron.SchedulerOption{
 		gocron.WithLogger(gocronLogger{logger}),
 		gocron.WithLocation(time.Local),
@@ -275,20 +276,16 @@ func scanSchedule(rows *sql.Rows) (LqSchedule, error) {
 	schedule.Id = id
 	schedule.Payload = queue.JSONPayload(payloadRaw)
 	if nextRunRaw.Valid {
-		nextRun := nextRunRaw.Time
-		schedule.NextRun = &nextRun
+		schedule.NextRun = new(nextRunRaw.Time)
 	}
 	if lastRunRaw.Valid {
-		lastRun := lastRunRaw.Time
-		schedule.LastRun = &lastRun
+		schedule.LastRun = new(lastRunRaw.Time)
 	}
 	if taskIDRaw.Valid {
-		taskID := taskIDRaw.Int64
-		schedule.TaskID = &taskID
+		schedule.TaskID = new(taskIDRaw.Int64)
 	}
 	if descRaw.Valid {
-		desc := descRaw.String
-		schedule.Description = &desc
+		schedule.Description = new(descRaw.String)
 	}
 
 	return schedule, nil

@@ -6,10 +6,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"schedulor"
-	"schedulor/queue"
 	"strings"
 	"time"
+
+	"schedulor"
+	"schedulor/queue"
 
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -36,7 +37,7 @@ type cliConfig struct {
 }
 
 type backendRuntime struct {
-	backend queue.QueueBackend
+	backend queue.Backend
 	db      schedulor.DbConnector
 	close   func() error
 }
@@ -48,7 +49,7 @@ type backendFactory interface {
 func main() {
 	cfg := parseConfig()
 	logger := newLogger(cfg.logLevel)
-	defer logger.Sync()
+	defer func() { _ = logger.Sync() }()
 	sugared := logger.Sugar()
 
 	if err := schedulor.LoadSettingsFromEnv(); err != nil {
@@ -60,7 +61,11 @@ func main() {
 		sugared.Fatalw("failed to build queue backend", "backend", cfg.queueBackend, "err", err)
 	}
 	if runtime.close != nil {
-		defer runtime.close()
+		defer func() {
+			if closeErr := runtime.close(); closeErr != nil {
+				sugared.Errorw("failed to close queue backend", "err", closeErr)
+			}
+		}()
 	}
 
 	taskExec := buildTaskExecutor(cfg, sugared)
@@ -272,8 +277,7 @@ func (noopQueue) Enqueue(
 	availableAt time.Time,
 	idemKey string,
 ) (*int64, error) {
-	id := int64(0)
-	return &id, nil
+	return new(int64(0)), nil
 }
 
 func (noopQueue) Claim(ctx context.Context, tasks []string, limit int) ([]queue.Claimed, error) {

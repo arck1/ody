@@ -2,8 +2,9 @@ package schedulor
 
 import (
 	"encoding/json"
-	"schedulor/queue"
 	"time"
+
+	"schedulor/queue"
 
 	"github.com/google/uuid"
 )

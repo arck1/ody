@@ -1,7 +1,12 @@
 SHELL := /bin/sh
 COMPOSE := docker compose
+TOOLS_DIR := $(CURDIR)/bin
+GOLANGCI_LINT := $(TOOLS_DIR)/golangci-lint
+GOLANGCI_LINT_VERSION := v2.13.2
+GO_ENV := GOCACHE=$(TOOLS_DIR)/go-build-cache
+LINT_ENV := $(GO_ENV) GOLANGCI_LINT_CACHE=$(TOOLS_DIR)/golangci-cache
 
-.PHONY: help deps-test up down restart logs ps test test-unit test-integration run-cli fmt tidy
+.PHONY: help deps-test up down restart logs ps test test-unit test-integration run-cli install-lint fmt fmt-check lint lint-fix check tidy
 
 help:
 	@echo "Targets:"
@@ -15,7 +20,12 @@ help:
 	@echo "  test-unit         Run unit tests"
 	@echo "  test-integration  Run integration tests (requires Docker)"
 	@echo "  run-cli           Run schedulor CLI"
-	@echo "  fmt               Run gofmt on all Go files"
+	@echo "  install-lint      Install the pinned golangci-lint version"
+	@echo "  fmt               Format Go files with golangci-lint"
+	@echo "  fmt-check         Check formatting without modifying files"
+	@echo "  lint              Run golangci-lint"
+	@echo "  lint-fix          Apply safe automatic lint fixes"
+	@echo "  check             Run formatting, lint, and unit test checks"
 	@echo "  tidy              Run go mod tidy"
 
 deps-test:
@@ -38,16 +48,33 @@ ps:
 test: test-unit
 
 test-unit:
-	go test ./...
+	$(GO_ENV) go test ./...
 
 test-integration: deps-test
-	go test -tags integration ./...
+	$(GO_ENV) go test -tags integration ./...
 
 run-cli:
 	go run ./cmd/schedulor
 
-fmt:
-	gofmt -w $$(find . -name '*.go' -type f)
+install-lint: $(GOLANGCI_LINT)
+
+$(GOLANGCI_LINT):
+	mkdir -p $(TOOLS_DIR)
+	$(GO_ENV) GOBIN=$(TOOLS_DIR) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+
+fmt: install-lint
+	$(LINT_ENV) $(GOLANGCI_LINT) fmt ./...
+
+fmt-check: install-lint
+	$(LINT_ENV) $(GOLANGCI_LINT) fmt --diff ./...
+
+lint: install-lint
+	$(LINT_ENV) $(GOLANGCI_LINT) run ./...
+
+lint-fix: install-lint
+	$(LINT_ENV) $(GOLANGCI_LINT) run --fix ./...
+
+check: fmt-check lint test-unit
 
 tidy:
 	go mod tidy

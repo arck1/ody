@@ -2,10 +2,12 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+
 	"schedulor/execution"
 	"schedulor/task"
 )
@@ -59,7 +61,7 @@ func TestRunWithoutFxStopsWithContext(t *testing.T) {
 	cancel()
 	select {
 	case err = <-done:
-		if err != context.Canceled {
+		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("Run error = %v, want context.Canceled", err)
 		}
 	case <-time.After(time.Second):

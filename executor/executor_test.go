@@ -36,8 +36,7 @@ func TestCodeTaskExecutor(t *testing.T) {
 	}
 
 	err := exec.Execute(context.Background(), claimedWithPayload(t, "missing", map[string]any{}))
-	var unknown *UnknownTaskName
-	if !errors.As(err, &unknown) {
+	if _, ok := errors.AsType[*UnknownTaskName](err); !ok {
 		t.Fatalf("expected UnknownTaskName, got: %v", err)
 	}
 }
@@ -84,8 +83,7 @@ func TestBashTaskExecutorFromCommands(t *testing.T) {
 	}
 
 	err := exec.Execute(context.Background(), claimedWithPayload(t, "missing", map[string]any{}))
-	var unknown *UnknownTaskName
-	if !errors.As(err, &unknown) {
+	if _, ok := errors.AsType[*UnknownTaskName](err); !ok {
 		t.Fatalf("expected UnknownTaskName, got: %v", err)
 	}
 }

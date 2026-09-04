@@ -2,8 +2,9 @@ package schedulor
 
 import (
 	"context"
-	"schedulor/queue"
 	"time"
+
+	"schedulor/queue"
 
 	"github.com/google/uuid"
 )
@@ -28,8 +29,7 @@ func (q *testQueueBackend) Enqueue(
 	availableAt time.Time,
 	idemKey string,
 ) (*int64, error) {
-	id := int64(1)
-	return &id, nil
+	return new(int64(1)), nil
 }
 
 func (q *testQueueBackend) Claim(ctx context.Context, tasks []string, limit int) ([]queue.Claimed, error) {

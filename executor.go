@@ -5,9 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"runtime/debug"
-	"schedulor/queue"
 	"sync"
 	"time"
+
+	"schedulor/queue"
 
 	"go.uber.org/fx"
 )
@@ -19,7 +20,7 @@ type LqExecutor struct {
 	// logger writes executor events and errors.
 	logger Logger
 	// queue is a backend used to claim/ack/nack tasks.
-	queue queue.QueueBackend
+	queue queue.Backend
 	// exec performs actual task business logic.
 	exec TaskExecutor
 	// options controls polling and batching behavior.
@@ -31,7 +32,7 @@ type LqExecutor struct {
 // NewLqExecutor builds executor from explicit interface dependencies.
 func NewLqExecutor(
 	logger Logger,
-	backend queue.QueueBackend,
+	backend queue.Backend,
 	exec TaskExecutor,
 	options *LqExecutorOptions,
 ) (*LqExecutor, error) {
@@ -98,7 +99,6 @@ func (e *LqExecutor) Run(ctx context.Context) {
 		e.logger.Warn("executor has no task names to process")
 		return
 	}
-	var unknownTaskError *UnknownTaskName
 
 	for {
 		select {
@@ -164,7 +164,7 @@ func (e *LqExecutor) Run(ctx context.Context) {
 			}
 			item.cancel()
 
-			if errors.As(err, &unknownTaskError) {
+			if _, ok := errors.AsType[*UnknownTaskName](err); ok {
 				e.moveToDLQ(ctx, item.task, err)
 			} else if err != nil {
 				if item.task.Attempts >= item.task.MaxAttempts {

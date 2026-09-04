@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"schedulor/queue"
 )
 
@@ -169,8 +170,7 @@ type reliabilityQueue struct {
 }
 
 func (q *reliabilityQueue) Enqueue(context.Context, string, queue.JSONPayload, time.Time, string) (*int64, error) {
-	id := int64(1)
-	return &id, nil
+	return new(int64(1)), nil
 }
 
 func (q *reliabilityQueue) Claim(context.Context, []string, int) ([]queue.Claimed, error) {

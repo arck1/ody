@@ -276,7 +276,7 @@ func (q *PostgresQueue) MoveToDLQ(
 	if err != nil {
 		return false, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	updateRes, err := tx.ExecContext(
 		ctx,

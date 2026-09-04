@@ -36,8 +36,7 @@ func TestCodeTaskExecutorUnknownTask(t *testing.T) {
 	exec := NewCodeTaskExecutor(nil)
 	payload, _ := queue.NewJSONPayload(map[string]any{"foo": "bar"})
 	err := exec.Execute(context.Background(), queue.Claimed{TaskID: 77, TaskName: "missing", Payload: payload})
-	var unknown *UnknownTaskName
-	if !errors.As(err, &unknown) {
+	if _, ok := errors.AsType[*UnknownTaskName](err); !ok {
 		t.Fatalf("expected UnknownTaskName, got: %v", err)
 	}
 }

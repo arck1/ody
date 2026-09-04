@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"schedulor/execution"
 )
 
@@ -53,7 +54,7 @@ func (s *Store) CreateExecution(ctx context.Context, request execution.CreateExe
 	if err != nil {
 		return execution.Execution{}, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	row := tx.QueryRowContext(ctx, `INSERT INTO task_executions
         (id, task_name, task_version, input, status, max_attempts, available_at, idempotency_key, pipeline_run_id, node_key, created_at)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT DO NOTHING RETURNING `+executionColumns,
@@ -157,7 +158,7 @@ func (s *Store) Claim(ctx context.Context, owner string, names []string, limit i
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	rows, err := tx.QueryContext(ctx, `WITH candidates AS (
         SELECT id FROM task_executions
         WHERE task_name = ANY($1) AND available_at <= now()
@@ -170,6 +171,7 @@ func (s *Store) Claim(ctx context.Context, owner string, names []string, limit i
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = rows.Close() }()
 	items := []execution.Execution{}
 	for rows.Next() {
 		item, scanErr := scanExecution(rows)
@@ -200,19 +202,22 @@ func (s *Store) ReapExpired(ctx context.Context) ([]uuid.UUID, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	rows, err := tx.QueryContext(ctx, `SELECT `+executionColumns+` FROM task_executions WHERE status='running' AND lease_until<=now() AND attempt>=max_attempts FOR UPDATE SKIP LOCKED`)
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = rows.Close() }()
 	items := []execution.Execution{}
 	for rows.Next() {
 		item, scanErr := scanExecution(rows)
 		if scanErr != nil {
-			rows.Close()
 			return nil, scanErr
 		}
 		items = append(items, item)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, err
 	}
 	if err = rows.Close(); err != nil {
 		return nil, err
@@ -260,7 +265,7 @@ func (s *Store) transition(ctx context.Context, id, token uuid.UUID, status exec
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	query := `UPDATE task_executions SET status=$3,last_error=$4,output=COALESCE($5,output),lease_owner='',lease_token=NULL,lease_until=NULL,finished_at=CASE WHEN $3 IN ('succeeded','failed','cancelled') THEN now() ELSE NULL END,available_at=CASE WHEN $3='retry' THEN $6 ELSE available_at END WHERE id=$1 AND lease_token=$2 AND status='running' RETURNING ` + executionColumns
 	var outputArg any
 	if output != nil {
@@ -295,7 +300,7 @@ func (s *Store) CancelExecution(ctx context.Context, id uuid.UUID, reason string
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	item, err := scanExecution(tx.QueryRowContext(ctx, `UPDATE task_executions SET status='cancelled',last_error=$2,lease_owner='',lease_token=NULL,lease_until=NULL,finished_at=now() WHERE id=$1 AND status NOT IN ('succeeded','failed','cancelled') RETURNING `+executionColumns, id, reason))
 	if errors.Is(err, sql.ErrNoRows) {
 		return execution.ErrNotFound

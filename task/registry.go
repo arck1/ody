@@ -52,8 +52,7 @@ type retryAfterError struct {
 func (e retryAfterError) Unwrap() error { return e.error }
 
 func RetryDelay(err error) (time.Duration, bool) {
-	var target retryAfterError
-	if errors.As(err, &target) {
+	if target, ok := errors.AsType[retryAfterError](err); ok {
 		return target.delay, true
 	}
 	return 0, false

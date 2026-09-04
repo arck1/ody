@@ -34,8 +34,8 @@ type WorkerQueue interface {
 	MoveToDLQ(ctx context.Context, taskId int64, leaseToken uuid.UUID, errText string) (bool, error)
 }
 
-// QueueBackend combines producer and worker queue capabilities.
-type QueueBackend interface {
+// Backend combines producer and worker queue capabilities.
+type Backend interface {
 	TasksQueue
 	WorkerQueue
 }

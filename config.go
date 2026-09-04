@@ -3,8 +3,9 @@ package schedulor
 import (
 	"fmt"
 	"os"
-	"schedulor/elector"
 	"time"
+
+	"schedulor/elector"
 
 	"github.com/caarlos0/env/v11"
 	"github.com/google/uuid"

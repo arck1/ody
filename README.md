@@ -1,5 +1,16 @@
 # schedulor
 
+## Документация
+
+Полное пользовательское руководство: [docs/README.md](docs/README.md).
+
+- [Быстрый старт](docs/getting-started.md)
+- [Конфигурация](docs/configuration.md)
+- [Generic-задачи](docs/tasks.md)
+- [Пайплайны](docs/pipelines.md)
+- [Запуск и эксплуатация](docs/operations.md)
+- [Cron и legacy queue](docs/legacy.md)
+
 ## Examples
 
 Готовые сценарии запуска: `examples/README.md`.
@@ -205,7 +216,7 @@ run, err := pipeline.Run(ctx, engine, flow, ImportInput{URL: url})
 ```
 
 Запуск worker без Fx — `Run` блокируется до отмены контекста и перед возвратом
-дожидается внутренних goroutine:
+дожидается polling goroutine. Handlers должны самостоятельно реагировать на отмену контекста:
 
 ```go
 runner, err := worker.New(store, registry, engine, observer, worker.Options{

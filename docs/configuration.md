@@ -64,27 +64,11 @@ Retry policy получает номер уже выполненной попы�
 `attempt` увеличивается при claim. `started_at` выставляется при первом claim, `finished_at` — при
 terminal transition. Каждая смена состояния добавляет append-only event.
 
-## Logging
+## Наблюдение за worker
 
-Typed worker сообщает события через `worker.Observer`; логгер ему не обязателен. Для метрик можно
-передать `monitoring/prometheus.Metrics`, который реализует Observer.
-
-Legacy-компоненты используют интерфейс `schedulor.Logger`. Готовый zap adapter:
-
-```go
-libraryLogger := schedulor.NewZapLogger(zapLogger.Sugar())
-```
-
-Собственная реализация должна принимать поля парами `key, value`:
-
-```go
-type Logger interface {
-    Debug(message string, fields ...any)
-    Info(message string, fields ...any)
-    Warn(message string, fields ...any)
-    Error(message string, fields ...any)
-}
-```
+Worker сообщает переходы выполнения через интерфейс `worker.Observer`; конкретный логгер ядру не
+нужен. Для метрик передайте `monitoring/prometheus.Metrics`. Для логирования или tracing можно
+реализовать собственный Observer и объединить несколько наблюдателей на уровне приложения.
 
 ## Переменные окружения CLI
 
@@ -92,16 +76,4 @@ Operational CLI:
 
 - `SCHEDULOR_DB_DSN` — PostgreSQL DSN;
 - `SCHEDULOR_ADMIN_ADDR` — адрес web server, default `127.0.0.1:8081`.
-
-Legacy CLI:
-
-- `SCHEDULOR_QUEUE_BACKEND`: `postgres`, `redis`, `kafka`, `noop`;
-- `SCHEDULOR_DB_DSN`;
-- `SCHEDULOR_REDIS_URL`, default `redis://localhost:6379/0`;
-- `SCHEDULOR_REDIS_PREFIX`, default `schedulor:{queue}:`;
-- `SCHEDULOR_EXECUTOR`, `SCHEDULOR_BASH_COMMANDS_FILE`;
-- `SCHEDULOR_EXECUTOR_TASK_NAMES`, `SCHEDULOR_EXECUTOR_COMMAND_FIELD`;
-- `SCHEDULOR_WITH_SCHEDULER`, `SCHEDULOR_LOG_LEVEL`.
-
-Kafka backend пока не реализован и возвращает `queue.ErrNotImplemented`.
 

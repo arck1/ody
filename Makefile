@@ -6,12 +6,12 @@ GOLANGCI_LINT_VERSION := v2.13.2
 GO_ENV := GOCACHE=$(TOOLS_DIR)/go-build-cache
 LINT_ENV := $(GO_ENV) GOLANGCI_LINT_CACHE=$(TOOLS_DIR)/golangci-cache
 
-.PHONY: help deps-test up down restart logs ps test test-unit test-integration test-functional-integration run-cli install-lint fmt fmt-check lint lint-fix check tidy
+.PHONY: help deps-test up down restart logs ps test test-unit test-integration test-functional-integration run-admin install-lint fmt fmt-check lint lint-fix check tidy
 
 help:
 	@echo "Targets:"
 	@echo "  deps-test         Install integration test dependencies"
-	@echo "  up                Start local dependencies (postgres, redis, kafka)"
+	@echo "  up                Start local PostgreSQL"
 	@echo "  down              Stop local dependencies"
 	@echo "  restart           Restart local dependencies"
 	@echo "  logs              Tail dependency logs"
@@ -19,8 +19,8 @@ help:
 	@echo "  test              Run unit tests"
 	@echo "  test-unit         Run unit tests"
 	@echo "  test-integration  Run integration tests (requires Docker)"
-	@echo "  test-functional-integration  Run PostgreSQL/Redis functional suites"
-	@echo "  run-cli           Run schedulor CLI"
+	@echo "  test-functional-integration  Run PostgreSQL functional suites"
+	@echo "  run-admin         Run operational CLI/web server"
 	@echo "  install-lint      Install the pinned golangci-lint version"
 	@echo "  fmt               Format Go files with golangci-lint"
 	@echo "  fmt-check         Check formatting without modifying files"
@@ -57,8 +57,8 @@ test-integration: deps-test
 test-functional-integration: deps-test
 	$(GO_ENV) go test -count=1 -v -tags integration ./functional
 
-run-cli:
-	go run ./cmd/schedulor
+run-admin:
+	go run ./cmd/schedulor-admin
 
 install-lint: $(GOLANGCI_LINT)
 

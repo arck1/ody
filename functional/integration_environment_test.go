@@ -9,7 +9,6 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	postgrescontainer "github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -18,10 +17,7 @@ import (
 	executionpostgres "schedulor/execution/postgres"
 )
 
-const (
-	postgresImage = "postgres:16-alpine"
-	redisImage    = "redis:7.4-alpine"
-)
+const postgresImage = "postgres:16-alpine"
 
 func startPostgres(t *testing.T) (*sql.DB, *executionpostgres.Store) {
 	t.Helper()
@@ -45,26 +41,4 @@ func startPostgres(t *testing.T) (*sql.DB, *executionpostgres.Store) {
 	require.NoError(t, err)
 	require.NoError(t, store.Migrate(ctx))
 	return db, store
-}
-
-func startRedis(t *testing.T) *redis.Client {
-	t.Helper()
-	testcontainers.SkipIfProviderIsNotHealthy(t)
-	ctx := context.Background()
-	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: testcontainers.ContainerRequest{
-			Image:        redisImage,
-			ExposedPorts: []string{"6379/tcp"},
-			WaitingFor:   wait.ForLog("Ready to accept connections").WithStartupTimeout(time.Minute),
-		},
-		Started: true,
-	})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, testcontainers.TerminateContainer(container)) })
-	endpoint, err := container.Endpoint(ctx, "")
-	require.NoError(t, err)
-	client := redis.NewClient(&redis.Options{Addr: endpoint})
-	t.Cleanup(func() { require.NoError(t, client.Close()) })
-	require.Eventually(t, func() bool { return client.Ping(ctx).Err() == nil }, 15*time.Second, 100*time.Millisecond)
-	return client
 }

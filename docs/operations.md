@@ -91,5 +91,4 @@ Web server по умолчанию слушает loopback и не содерж�
 - собирайте `/metrics` и alert на рост `failed`, `retry`, `scrape_error`;
 - ограничьте доступ к operator API;
 - периодически определяйте retention/архивацию terminal executions и events на уровне приложения;
-- запускайте `make test-functional-integration` с реальными PostgreSQL и Redis перед релизом.
-
+- запускайте `make test-functional-integration` с реальным PostgreSQL перед релизом.

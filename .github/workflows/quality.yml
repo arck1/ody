@@ -44,5 +44,5 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: PostgreSQL and Redis functional tests
+      - name: PostgreSQL functional tests
         run: make test-functional-integration

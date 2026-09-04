@@ -1,6 +1,0 @@
-{
-  "tasks": {
-    "health_ping": "curl -fsS http://localhost:8080/health",
-    "cleanup_tmp": "rm -rf /tmp/app-cache"
-  }
-}

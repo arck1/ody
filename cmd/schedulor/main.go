@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -28,6 +29,8 @@ func (c sqlConnector) GetConnect(ctx context.Context) (*sql.DB, error) {
 type cliConfig struct {
 	queueBackend      string
 	dbDSN             string
+	redisURL          string
+	redisPrefix       string
 	executorType      string
 	bashCommandsFile  string
 	executorTaskNames string
@@ -98,6 +101,8 @@ func parseConfig() cliConfig {
 	cfg := cliConfig{}
 	flag.StringVar(&cfg.queueBackend, "queue-backend", envOrDefault("SCHEDULOR_QUEUE_BACKEND", "postgres"), "Queue backend: postgres|redis|kafka|noop")
 	flag.StringVar(&cfg.dbDSN, "db-dsn", envOrDefault("SCHEDULOR_DB_DSN", ""), "PostgreSQL DSN (required for postgres backend)")
+	flag.StringVar(&cfg.redisURL, "redis-url", envOrDefault("SCHEDULOR_REDIS_URL", "redis://localhost:6379/0"), "Redis URL (required for redis backend)")
+	flag.StringVar(&cfg.redisPrefix, "redis-prefix", envOrDefault("SCHEDULOR_REDIS_PREFIX", "schedulor:{queue}:"), "Redis key prefix")
 	flag.StringVar(&cfg.executorType, "executor", envOrDefault("SCHEDULOR_EXECUTOR", "bash"), "Executor type: bash")
 	flag.StringVar(&cfg.bashCommandsFile, "bash-commands-file", envOrDefault("SCHEDULOR_BASH_COMMANDS_FILE", ""), "Path to JSON file with task commands")
 	flag.StringVar(&cfg.executorTaskNames, "executor-task-names", envOrDefault("SCHEDULOR_EXECUTOR_TASK_NAMES", "bash"), "Comma-separated task names for payload command mode")
@@ -135,8 +140,26 @@ func (redisBackendFactory) Build(
 	settings schedulor.LqSettings,
 	logger *zap.SugaredLogger,
 ) (*backendRuntime, error) {
-	logger.Infow("initialized queue backend", "backend", "redis")
-	return &backendRuntime{backend: queue.NewRedisQueue()}, nil
+	options, err := redis.ParseURL(cfg.redisURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse redis url: %w", err)
+	}
+	client := redis.NewClient(options)
+	if err = client.Ping(ctx).Err(); err != nil {
+		_ = client.Close()
+		return nil, fmt.Errorf("ping redis: %w", err)
+	}
+	backend, err := queue.NewRedisQueue(client, queue.RedisQueueOptions{
+		Prefix:          cfg.redisPrefix,
+		TaskMaxAttempts: settings.TaskMaxAttempts,
+		TaskVisibility:  settings.TaskVisibility,
+	})
+	if err != nil {
+		_ = client.Close()
+		return nil, err
+	}
+	logger.Infow("initialized queue backend", "backend", "redis", "prefix", cfg.redisPrefix)
+	return &backendRuntime{backend: backend, close: client.Close}, nil
 }
 
 type kafkaBackendFactory struct{}

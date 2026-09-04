@@ -31,6 +31,8 @@ go run ./cmd/schedulor
 
 - `--queue-backend` или `SCHEDULOR_QUEUE_BACKEND` (`postgres|redis|kafka|noop`)
 - `--db-dsn` или `SCHEDULOR_DB_DSN`
+- `--redis-url` или `SCHEDULOR_REDIS_URL` (по умолчанию `redis://localhost:6379/0`)
+- `--redis-prefix` или `SCHEDULOR_REDIS_PREFIX` (по умолчанию `schedulor:{queue}:`)
 - `--executor` или `SCHEDULOR_EXECUTOR` (`bash`)
 - `--bash-commands-file` или `SCHEDULOR_BASH_COMMANDS_FILE`
 - `--executor-task-names` или `SCHEDULOR_EXECUTOR_TASK_NAMES`
@@ -38,12 +40,43 @@ go run ./cmd/schedulor
 - `--with-scheduler` или `SCHEDULOR_WITH_SCHEDULER` (`true`)
 - `--log-level` или `SCHEDULOR_LOG_LEVEL` (`debug|info|warn|error`)
 
+Запуск worker с Redis без PostgreSQL scheduler:
+
+```bash
+SCHEDULOR_QUEUE_BACKEND=redis \
+SCHEDULOR_REDIS_URL='redis://localhost:6379/0' \
+SCHEDULOR_WITH_SCHEDULER=false \
+go run ./cmd/schedulor
+```
+
+Redis backend реализует идемпотентную постановку, отложенную доставку, атомарный claim,
+lease/heartbeat, `ack`, повторную доставку через `nack` и DLQ. Операции выполняются Lua-скриптами,
+поэтому переходы состояния атомарны. Для Redis Cluster все ключи должны попадать в один hash slot:
+сохраняйте общий hash tag (например, `{queue}`) в пользовательском prefix.
+
+Программное подключение не привязано к конкретному режиму клиента go-redis:
+
+```go
+client := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+backend, err := queue.NewRedisQueue(client, queue.RedisQueueOptions{
+  Prefix:          "billing:{queue}:",
+  TaskMaxAttempts: 5,
+  TaskVisibility:  30 * time.Second,
+})
+if err != nil {
+  return err
+}
+defer client.Close()
+```
+
+Клиент создаёт и закрывает приложение; queue использует переданный `redis.UniversalClient`.
+
 ## Fx Entry Point
 
 Для запуска через `fx` используй `NewFxApp(...)`:
 
 ```go
-backend := queue.NewPostgresQueue(db, &queue.PostgresQueueOptions{
+backend := queue.NewPostgresQueue(db, queue.PostgresQueueOptions{
   TaskMaxAttempts: 25,
   TaskVisibility:  60 * time.Second,
 })

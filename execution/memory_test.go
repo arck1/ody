@@ -122,7 +122,7 @@ func TestMemoryStorePurgesOnlyTerminalHistory(t *testing.T) {
 	if err := store.Succeed(ctx, node.ID, claimed[0].LeaseToken, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SetPipelineRunStatus(ctx, run.ID, RunSucceeded, ""); err != nil {
+	if err := store.SetPipelineRunStatus(ctx, run.ID, run.Revision, RunSucceeded, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -138,5 +138,19 @@ func TestMemoryStorePurgesOnlyTerminalHistory(t *testing.T) {
 	}
 	if _, err = store.GetExecution(ctx, terminal.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("terminal execution still exists: %v", err)
+	}
+}
+
+func TestMemoryStoreRejectsStalePipelineRevision(t *testing.T) {
+	store := NewMemoryStore()
+	run, err := store.CreatePipelineRun(context.Background(), CreatePipelineRun{PipelineName: "cas", PipelineVersion: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.SetPipelineRunStatus(context.Background(), run.ID, run.Revision, RunRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.SetPipelineRunStatus(context.Background(), run.ID, run.Revision, RunFailed, "stale"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale transition error = %v, want ErrConflict", err)
 	}
 }

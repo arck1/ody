@@ -73,6 +73,8 @@ result, err := pipeline.Output(ctx, store, run.ID, indexed)
 - `app.PipelineEngine().Cancel(ctx, runID, reason)` отменяет незавершённые nodes и сам run.
 - `app.RestartExecution(ctx, executionID)` безопасно сбрасывает узел и существующих потомков.
 - Worker вызывает `Advance` после terminal transition node.
+- Каждый переход run использует revision compare-and-set, поэтому параллельные coordinator не
+  перезаписывают решения друг друга устаревшим snapshot.
 - `engine.Reconcile(ctx)` продолжает `pending`/`running` pipelines после process crash между
   сохранением результата и созданием следующего узла.
 

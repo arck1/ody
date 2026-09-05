@@ -95,6 +95,8 @@ and their tests whenever `execution.Store` changes.
 - A failed or cancelled node fails the run and prevents unscheduled descendants from starting.
 - The same registry must be available after restart so `Reconcile` can resume DAGs.
 - `pipeline.Engine.Advance` is idempotent; preserve this property.
+- Pipeline run transitions use `revision` compare-and-set; stale coordinators retry from persisted
+  state and must not overwrite a newer terminal decision.
 
 ## Monitoring and operations
 

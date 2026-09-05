@@ -64,7 +64,7 @@ func (s *ServiceSuite) TestPipelineRestartRequiresCoordinator() {
 	claimed, err := s.store.Claim(s.ctx, "worker", []execution.TaskKey{{Name: "fetch", Version: 0}}, 1, time.Minute)
 	s.Require().NoError(err)
 	s.Require().NoError(s.store.Fail(s.ctx, created.ID, claimed[0].LeaseToken, "network"))
-	s.Require().NoError(s.store.SetPipelineRunStatus(s.ctx, run.ID, execution.RunFailed, "node fetch"))
+	s.Require().NoError(s.store.SetPipelineRunStatus(s.ctx, run.ID, run.Revision, execution.RunFailed, "node fetch"))
 
 	_, err = s.service.RestartTask(s.ctx, created.ID)
 	s.ErrorIs(err, execution.ErrPipelineExecution)

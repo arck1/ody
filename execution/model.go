@@ -48,6 +48,7 @@ var (
 	ErrLeaseLost         = errors.New("execution lease lost")
 	ErrActive            = errors.New("execution is active")
 	ErrPipelineExecution = errors.New("pipeline execution requires pipeline coordinator")
+	ErrConflict          = errors.New("state revision conflict")
 )
 
 // Execution is one durable invocation of a task definition.
@@ -114,6 +115,7 @@ type PipelineRun struct {
 	Status          RunStatus       `json:"status"`
 	Error           string          `json:"error,omitempty"`
 	IdempotencyKey  string          `json:"idempotency_key,omitempty"`
+	Revision        uint64          `json:"revision"`
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
 	FinishedAt      *time.Time      `json:"finished_at,omitempty"`

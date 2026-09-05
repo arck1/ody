@@ -73,9 +73,22 @@ func Run[I any](ctx context.Context, engine *Engine, definition *Definition[I], 
 
 // Advance idempotently schedules ready nodes and updates terminal run state.
 func (e *Engine) Advance(ctx context.Context, runID uuid.UUID) error {
+	for range 4 {
+		err := e.advanceOnce(ctx, runID)
+		if !errors.Is(err, execution.ErrConflict) {
+			return err
+		}
+	}
+	return fmt.Errorf("advance pipeline %s: %w", runID, execution.ErrConflict)
+}
+
+func (e *Engine) advanceOnce(ctx context.Context, runID uuid.UUID) error {
 	run, err := e.store.GetPipelineRun(ctx, runID)
 	if err != nil {
 		return err
+	}
+	if run.Status == execution.RunSucceeded || run.Status == execution.RunFailed || run.Status == execution.RunCancelled {
+		return nil
 	}
 	definition, ok := e.registry.definitions[registryKey(run.PipelineName, run.PipelineVersion)]
 	if !ok {
@@ -95,7 +108,7 @@ func (e *Engine) Advance(ctx context.Context, runID uuid.UUID) error {
 			outputs[item.NodeKey] = item.Output
 		}
 		if item.Status == execution.StatusFailed || item.Status == execution.StatusCancelled {
-			return e.store.SetPipelineRunStatus(ctx, runID, execution.RunFailed, fmt.Sprintf("node %s: %s", item.NodeKey, item.LastError))
+			return e.store.SetPipelineRunStatus(ctx, runID, run.Revision, execution.RunFailed, fmt.Sprintf("node %s: %s", item.NodeKey, item.LastError))
 		}
 	}
 	created := false
@@ -116,7 +129,7 @@ func (e *Engine) Advance(ctx context.Context, runID uuid.UUID) error {
 		}
 		input, buildErr := safeBuildInput(node, run.Input, outputs)
 		if buildErr != nil {
-			statusErr := e.store.SetPipelineRunStatus(ctx, runID, execution.RunFailed, fmt.Sprintf("build node %s input: %v", node.key, buildErr))
+			statusErr := e.store.SetPipelineRunStatus(ctx, runID, run.Revision, execution.RunFailed, fmt.Sprintf("build node %s input: %v", node.key, buildErr))
 			return errors.Join(buildErr, statusErr)
 		}
 		if exists {
@@ -139,7 +152,7 @@ func (e *Engine) Advance(ctx context.Context, runID uuid.UUID) error {
 		created = true
 	}
 	if len(definition.nodes) == 0 {
-		return e.store.SetPipelineRunStatus(ctx, runID, execution.RunSucceeded, "")
+		return e.store.SetPipelineRunStatus(ctx, runID, run.Revision, execution.RunSucceeded, "")
 	}
 	if len(byNode) == len(definition.nodes) {
 		allSucceeded := true
@@ -150,11 +163,11 @@ func (e *Engine) Advance(ctx context.Context, runID uuid.UUID) error {
 			}
 		}
 		if allSucceeded {
-			return e.store.SetPipelineRunStatus(ctx, runID, execution.RunSucceeded, "")
+			return e.store.SetPipelineRunStatus(ctx, runID, run.Revision, execution.RunSucceeded, "")
 		}
 	}
 	if created || run.Status == execution.RunPending {
-		return e.store.SetPipelineRunStatus(ctx, runID, execution.RunRunning, "")
+		return e.store.SetPipelineRunStatus(ctx, runID, run.Revision, execution.RunRunning, "")
 	}
 	return nil
 }
@@ -252,6 +265,10 @@ func (e *Engine) Inspect(ctx context.Context, runID uuid.UUID) (Snapshot, error)
 
 // Cancel marks a run cancelled and invalidates all unfinished node deliveries.
 func (e *Engine) Cancel(ctx context.Context, runID uuid.UUID, reason string) error {
+	run, err := e.store.GetPipelineRun(ctx, runID)
+	if err != nil {
+		return err
+	}
 	items, err := e.store.ListRunExecutions(ctx, runID)
 	if err != nil {
 		return err
@@ -263,7 +280,7 @@ func (e *Engine) Cancel(ctx context.Context, runID uuid.UUID, reason string) err
 			}
 		}
 	}
-	return e.store.SetPipelineRunStatus(ctx, runID, execution.RunCancelled, reason)
+	return e.store.SetPipelineRunStatus(ctx, runID, run.Revision, execution.RunCancelled, reason)
 }
 
 // Output decodes one node's stored result.

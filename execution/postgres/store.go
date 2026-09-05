@@ -450,7 +450,7 @@ func (s *Store) RestartPipelineSubgraph(ctx context.Context, request execution.R
 			return execution.Execution{}, err
 		}
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE pipeline_runs SET status='running',error='',updated_at=now(),finished_at=NULL WHERE id=$1`, request.RunID)
+	result, err := tx.ExecContext(ctx, `UPDATE pipeline_runs SET status='running',error='',updated_at=now(),finished_at=NULL,revision=revision+1 WHERE id=$1`, request.RunID)
 	if err != nil {
 		return execution.Execution{}, err
 	}
@@ -608,14 +608,14 @@ func (s *Store) CreatePipelineRun(ctx context.Context, r execution.CreatePipelin
 	if r.IdempotencyKey == "" {
 		return execution.PipelineRun{}, errors.New("pipeline insert conflicted without an idempotency key")
 	}
-	return scanPipelineRun(s.db.QueryRowContext(ctx, `SELECT id,pipeline_name,pipeline_version,input,status,error,idempotency_key,created_at,updated_at,finished_at FROM pipeline_runs WHERE pipeline_name=$1 AND idempotency_key=$2`, r.PipelineName, r.IdempotencyKey))
+	return scanPipelineRun(s.db.QueryRowContext(ctx, `SELECT id,pipeline_name,pipeline_version,input,status,error,idempotency_key,revision,created_at,updated_at,finished_at FROM pipeline_runs WHERE pipeline_name=$1 AND idempotency_key=$2`, r.PipelineName, r.IdempotencyKey))
 }
 func (s *Store) GetPipelineRun(ctx context.Context, id uuid.UUID) (execution.PipelineRun, error) {
-	run, err := scanPipelineRun(s.db.QueryRowContext(ctx, `SELECT id,pipeline_name,pipeline_version,input,status,error,idempotency_key,created_at,updated_at,finished_at FROM pipeline_runs WHERE id=$1`, id))
+	run, err := scanPipelineRun(s.db.QueryRowContext(ctx, `SELECT id,pipeline_name,pipeline_version,input,status,error,idempotency_key,revision,created_at,updated_at,finished_at FROM pipeline_runs WHERE id=$1`, id))
 	return run, translateNotFound(err)
 }
 func (s *Store) ListPipelineRuns(ctx context.Context, filter execution.RunFilter) ([]execution.PipelineRun, error) {
-	query := `SELECT id,pipeline_name,pipeline_version,input,status,error,idempotency_key,created_at,updated_at,finished_at FROM pipeline_runs`
+	query := `SELECT id,pipeline_name,pipeline_version,input,status,error,idempotency_key,revision,created_at,updated_at,finished_at FROM pipeline_runs`
 	args := []any{}
 	conditions := []string{}
 	if len(filter.Statuses) > 0 {
@@ -653,9 +653,27 @@ func (s *Store) ListPipelineRuns(ctx context.Context, filter execution.RunFilter
 	}
 	return items, rows.Err()
 }
-func (s *Store) SetPipelineRunStatus(ctx context.Context, id uuid.UUID, status execution.RunStatus, text string) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE pipeline_runs SET status=$2,error=$3,updated_at=now(),finished_at=CASE WHEN $2 IN ('succeeded','failed','cancelled') THEN now() ELSE NULL END WHERE id=$1`, id, status, text)
-	return foundResult(result, err)
+func (s *Store) SetPipelineRunStatus(ctx context.Context, id uuid.UUID, expectedRevision uint64, status execution.RunStatus, text string) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE pipeline_runs SET status=$3,error=$4,updated_at=now(),revision=revision+1,
+		finished_at=CASE WHEN $3 IN ('succeeded','failed','cancelled') THEN now() ELSE NULL END WHERE id=$1 AND revision=$2`, id, expectedRevision, status, text)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected > 0 {
+		return nil
+	}
+	var exists bool
+	if err = s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pipeline_runs WHERE id=$1)`, id).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return execution.ErrNotFound
+	}
+	return execution.ErrConflict
 }
 
 type scanner interface{ Scan(...any) error }
@@ -665,7 +683,7 @@ func scanPipelineRun(row scanner) (execution.PipelineRun, error) {
 	var finished sql.NullTime
 	var raw []byte
 	var idempotency sql.NullString
-	err := row.Scan(&run.ID, &run.PipelineName, &run.PipelineVersion, &raw, &run.Status, &run.Error, &idempotency, &run.CreatedAt, &run.UpdatedAt, &finished)
+	err := row.Scan(&run.ID, &run.PipelineName, &run.PipelineVersion, &raw, &run.Status, &run.Error, &idempotency, &run.Revision, &run.CreatedAt, &run.UpdatedAt, &finished)
 	run.Input = raw
 	if idempotency.Valid {
 		run.IdempotencyKey = idempotency.String

@@ -376,7 +376,7 @@ func (s *MemoryStore) RestartPipelineSubgraph(_ context.Context, request Restart
 			root = item
 		}
 	}
-	run.Status, run.Error, run.FinishedAt, run.UpdatedAt = RunRunning, "", nil, now
+	run.Status, run.Error, run.FinishedAt, run.UpdatedAt, run.Revision = RunRunning, "", nil, now, run.Revision+1
 	s.runs[run.ID] = run
 	return cloneExecution(root), nil
 }
@@ -487,15 +487,18 @@ func (s *MemoryStore) ListPipelineRuns(_ context.Context, filter RunFilter) ([]P
 	return items, nil
 }
 
-func (s *MemoryStore) SetPipelineRunStatus(_ context.Context, id uuid.UUID, status RunStatus, errorText string) error {
+func (s *MemoryStore) SetPipelineRunStatus(_ context.Context, id uuid.UUID, expectedRevision uint64, status RunStatus, errorText string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	run, ok := s.runs[id]
 	if !ok {
 		return ErrNotFound
 	}
+	if run.Revision != expectedRevision {
+		return ErrConflict
+	}
 	now := s.now()
-	run.Status, run.Error, run.UpdatedAt = status, errorText, now
+	run.Status, run.Error, run.UpdatedAt, run.Revision = status, errorText, now, run.Revision+1
 	if status == RunSucceeded || status == RunFailed || status == RunCancelled {
 		run.FinishedAt = new(now)
 	}

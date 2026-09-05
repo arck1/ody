@@ -69,7 +69,7 @@ func TestStoreRetryAndPipelineLifecycle(t *testing.T) {
 
 	run, err := store.CreatePipelineRun(ctx, execution.CreatePipelineRun{PipelineName: "flow", PipelineVersion: 1, Input: []byte(`{}`)})
 	require.NoError(t, err)
-	require.NoError(t, store.SetPipelineRunStatus(ctx, run.ID, execution.RunRunning, ""))
+	require.NoError(t, store.SetPipelineRunStatus(ctx, run.ID, run.Revision, execution.RunRunning, ""))
 	created, err := store.CreateExecution(ctx, execution.CreateExecution{
 		TaskName: "step", TaskVersion: 1, MaxAttempts: 2, PipelineRunID: &run.ID, NodeKey: "first",
 	})
@@ -85,7 +85,9 @@ func TestStoreRetryAndPipelineLifecycle(t *testing.T) {
 	require.Equal(t, execution.StatusFailed, failed.Status)
 	require.ErrorIs(t, store.Heartbeat(ctx, created.ID, claimed[0].LeaseToken, time.Second), execution.ErrLeaseLost)
 
-	require.NoError(t, store.SetPipelineRunStatus(ctx, run.ID, execution.RunFailed, "step failed"))
+	currentRun, err := store.GetPipelineRun(ctx, run.ID)
+	require.NoError(t, err)
+	require.NoError(t, store.SetPipelineRunStatus(ctx, run.ID, currentRun.Revision, execution.RunFailed, "step failed"))
 	storedRun, err := store.GetPipelineRun(ctx, run.ID)
 	require.NoError(t, err)
 	require.Equal(t, execution.RunFailed, storedRun.Status)
@@ -130,7 +132,7 @@ func TestStoreMaintainsBoundedStatistics(t *testing.T) {
 	require.NoError(t, store.Succeed(ctx, created.ID, claimed[0].LeaseToken, json.RawMessage(`1`)))
 	run, err := store.CreatePipelineRun(ctx, execution.CreatePipelineRun{PipelineName: "counted-flow", PipelineVersion: 1})
 	require.NoError(t, err)
-	require.NoError(t, store.SetPipelineRunStatus(ctx, run.ID, execution.RunRunning, ""))
+	require.NoError(t, store.SetPipelineRunStatus(ctx, run.ID, run.Revision, execution.RunRunning, ""))
 
 	executionCounts, err := store.ExecutionCounts(ctx)
 	require.NoError(t, err)

@@ -6,12 +6,14 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     status TEXT NOT NULL CHECK (status IN ('pending','running','succeeded','failed','cancelled')),
     error TEXT NOT NULL DEFAULT '',
     idempotency_key TEXT,
+    revision BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
     finished_at TIMESTAMPTZ
 );
 
 ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+ALTER TABLE pipeline_runs ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT 0;
 
 CREATE UNIQUE INDEX IF NOT EXISTS pipeline_runs_idempotency_idx
     ON pipeline_runs(pipeline_name, idempotency_key)

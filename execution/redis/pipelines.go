@@ -125,7 +125,7 @@ func (s *Store) pipelineIDs(ctx context.Context, statuses []execution.RunStatus)
 }
 
 // SetPipelineRunStatus updates the run hash and moves it between status indexes atomically.
-func (s *Store) SetPipelineRunStatus(ctx context.Context, id uuid.UUID, status execution.RunStatus, errorText string) error {
+func (s *Store) SetPipelineRunStatus(ctx context.Context, id uuid.UUID, expectedRevision uint64, status execution.RunStatus, errorText string) error {
 	now, err := s.now(ctx)
 	if err != nil {
 		return err
@@ -142,8 +142,11 @@ func (s *Store) SetPipelineRunStatus(ctx context.Context, id uuid.UUID, status e
 		if getErr != nil {
 			return getErr
 		}
+		if run.Revision != expectedRevision {
+			return execution.ErrConflict
+		}
 		previous := run.Status
-		run.Status, run.Error, run.UpdatedAt = status, errorText, now
+		run.Status, run.Error, run.UpdatedAt, run.Revision = status, errorText, now, run.Revision+1
 		if status == execution.RunSucceeded || status == execution.RunFailed || status == execution.RunCancelled {
 			run.FinishedAt = new(now)
 		} else {

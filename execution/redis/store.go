@@ -612,7 +612,7 @@ func (s *Store) RestartPipelineSubgraph(ctx context.Context, request execution.R
 		}
 		foundRoot := false
 		previousRunStatus := run.Status
-		run.Status, run.Error, run.UpdatedAt, run.FinishedAt = execution.RunRunning, "", now, nil
+		run.Status, run.Error, run.UpdatedAt, run.FinishedAt, run.Revision = execution.RunRunning, "", now, nil, run.Revision+1
 		_, getErr = tx.TxPipelined(ctx, func(pipe redislib.Pipeliner) error {
 			for index := range items {
 				item := &items[index]

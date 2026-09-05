@@ -33,6 +33,8 @@ func NewMemoryStore() *MemoryStore {
 	}
 }
 
+// CreateExecution provides the same idempotency and pipeline-node uniqueness behavior as durable
+// stores, but scopes it to this process.
 func (s *MemoryStore) CreateExecution(_ context.Context, request CreateExecution) (Execution, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -59,10 +61,17 @@ func (s *MemoryStore) CreateExecution(_ context.Context, request CreateExecution
 		request.MaxAttempts = 1
 	}
 	item := Execution{
-		ID: uuid.New(), TaskName: request.TaskName, TaskVersion: request.TaskVersion,
-		Input: cloneJSON(request.Input), Status: StatusPending, MaxAttempts: request.MaxAttempts,
-		AvailableAt: request.AvailableAt, IdempotencyKey: request.IdempotencyKey,
-		PipelineRunID: cloneUUID(request.PipelineRunID), NodeKey: request.NodeKey, CreatedAt: now,
+		ID:             uuid.New(),
+		TaskName:       request.TaskName,
+		TaskVersion:    request.TaskVersion,
+		Input:          cloneJSON(request.Input),
+		Status:         StatusPending,
+		MaxAttempts:    request.MaxAttempts,
+		AvailableAt:    request.AvailableAt,
+		IdempotencyKey: request.IdempotencyKey,
+		PipelineRunID:  cloneUUID(request.PipelineRunID),
+		NodeKey:        request.NodeKey,
+		CreatedAt:      now,
 	}
 	s.executions[item.ID] = item
 	if request.IdempotencyKey != "" {
@@ -318,7 +327,15 @@ func (s *MemoryStore) CreatePipelineRun(_ context.Context, request CreatePipelin
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
-	run := PipelineRun{ID: uuid.New(), PipelineName: request.PipelineName, PipelineVersion: request.PipelineVersion, Input: cloneJSON(request.Input), Status: RunPending, CreatedAt: now, UpdatedAt: now}
+	run := PipelineRun{
+		ID:              uuid.New(),
+		PipelineName:    request.PipelineName,
+		PipelineVersion: request.PipelineVersion,
+		Input:           cloneJSON(request.Input),
+		Status:          RunPending,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
 	s.runs[run.ID] = run
 	return cloneRun(run), nil
 }
@@ -381,7 +398,11 @@ func (s *MemoryStore) owned(id, token uuid.UUID) (Execution, error) {
 }
 
 func (s *MemoryStore) appendEvent(item Execution, eventType EventType, errorText string) {
-	s.events[item.ID] = append(s.events[item.ID], Event{ID: uuid.New(), ExecutionID: item.ID, Type: eventType, Attempt: item.Attempt, Error: errorText, CreatedAt: s.now()})
+	event := Event{
+		ID: uuid.New(), ExecutionID: item.ID, Type: eventType,
+		Attempt: item.Attempt, Error: errorText, CreatedAt: s.now(),
+	}
+	s.events[item.ID] = append(s.events[item.ID], event)
 }
 
 func cloneExecution(item Execution) Execution {

@@ -1,9 +1,7 @@
-// Package redis implements execution.Store with Redis.
 package redis
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,13 +16,14 @@ import (
 
 const defaultPrefix = "schedulor:{execution}:"
 
-// Options configures Redis key names. Prefix should contain a common Redis Cluster hash tag.
+// Options configures Redis key names.
 type Options struct {
+	// Prefix isolates applications and environments. Keep a common {...} hash tag for Redis Cluster.
 	Prefix string
 }
 
-// Store persists the complete execution model and uses sorted sets as the delivery queue.
-// The caller owns and closes the Redis client.
+// Store persists the complete execution model and uses sorted sets as its delivery queue.
+// It never closes the client; client ownership remains with the application.
 type Store struct {
 	client redislib.UniversalClient
 	prefix string
@@ -42,6 +41,8 @@ func New(client redislib.UniversalClient, options Options) (*Store, error) {
 	return &Store{client: client, prefix: options.Prefix}, nil
 }
 
+// CreateExecution atomically creates the record, its queue/index entries, and the created event.
+// Existing idempotency or pipeline-node references return the original execution.
 func (s *Store) CreateExecution(ctx context.Context, request execution.CreateExecution) (execution.Execution, error) {
 	if request.TaskName == "" {
 		return execution.Execution{}, errors.New("task name is empty")
@@ -115,6 +116,7 @@ func (s *Store) CreateExecution(ctx context.Context, request execution.CreateExe
 	return item, err
 }
 
+// GetExecution reads the source-of-truth execution record rather than reconstructing it from indexes.
 func (s *Store) GetExecution(ctx context.Context, id uuid.UUID) (execution.Execution, error) {
 	value, err := s.client.Get(ctx, s.executionKey(id)).Bytes()
 	if errors.Is(err, redislib.Nil) {
@@ -130,16 +132,9 @@ func (s *Store) GetExecution(ctx context.Context, id uuid.UUID) (execution.Execu
 	return item, nil
 }
 
+// ListExecutions selects the narrowest available index and applies any remaining filters to records.
 func (s *Store) ListExecutions(ctx context.Context, filter execution.ListFilter) ([]execution.Execution, error) {
-	key := s.executionsKey()
-	if filter.PipelineRunID != nil {
-		key = s.runExecutionsKey(*filter.PipelineRunID)
-	} else if filter.TaskName != "" {
-		key = s.taskIndexKey(filter.TaskName)
-	} else if filter.Status != "" {
-		key = s.statusKey(filter.Status)
-	}
-	ids, err := s.client.ZRevRange(ctx, key, 0, -1).Result()
+	ids, err := s.client.ZRevRange(ctx, s.executionIndexFor(filter), 0, -1).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -153,8 +148,7 @@ func (s *Store) ListExecutions(ctx context.Context, filter execution.ListFilter)
 		if getErr != nil {
 			return nil, getErr
 		}
-		if filter.TaskName != "" && item.TaskName != filter.TaskName || filter.Status != "" && item.Status != filter.Status ||
-			filter.PipelineRunID != nil && (item.PipelineRunID == nil || *item.PipelineRunID != *filter.PipelineRunID) {
+		if !matchesExecutionFilter(item, filter) {
 			continue
 		}
 		items = append(items, item)
@@ -165,6 +159,31 @@ func (s *Store) ListExecutions(ctx context.Context, filter execution.ListFilter)
 	return items, nil
 }
 
+// executionIndexFor avoids a full scan whenever the filter supplies an indexed dimension.
+func (s *Store) executionIndexFor(filter execution.ListFilter) string {
+	switch {
+	case filter.PipelineRunID != nil:
+		return s.runExecutionsKey(*filter.PipelineRunID)
+	case filter.TaskName != "":
+		return s.taskIndexKey(filter.TaskName)
+	case filter.Status != "":
+		return s.statusKey(filter.Status)
+	default:
+		return s.executionsKey()
+	}
+}
+
+func matchesExecutionFilter(item execution.Execution, filter execution.ListFilter) bool {
+	if filter.TaskName != "" && item.TaskName != filter.TaskName {
+		return false
+	}
+	if filter.Status != "" && item.Status != filter.Status {
+		return false
+	}
+	return filter.PipelineRunID == nil || item.PipelineRunID != nil && *item.PipelineRunID == *filter.PipelineRunID
+}
+
+// ListRunExecutions returns pipeline nodes in creation order.
 func (s *Store) ListRunExecutions(ctx context.Context, runID uuid.UUID) ([]execution.Execution, error) {
 	ids, err := s.client.ZRange(ctx, s.runExecutionsKey(runID), 0, -1).Result()
 	if err != nil {
@@ -185,6 +204,11 @@ func (s *Store) ListRunExecutions(ctx context.Context, runID uuid.UUID) ([]execu
 	return items, nil
 }
 
+// Claim acquires up to limit due executions for owner.
+//
+// Candidates are discovered through per-task queue indexes, then claimed one at a time with WATCH.
+// Claiming one record per transaction keeps contention local: workers racing for the same task may
+// lose that candidate without rolling back other records they already claimed.
 func (s *Store) Claim(ctx context.Context, owner string, names []string, limit int, lease time.Duration) ([]execution.Execution, error) {
 	if limit <= 0 {
 		limit = 1
@@ -194,14 +218,74 @@ func (s *Store) Claim(ctx context.Context, owner string, names []string, limit i
 		return nil, err
 	}
 	accepted := make(map[string]struct{}, len(names))
-	candidates := make(map[uuid.UUID]execution.Execution)
 	for _, name := range names {
 		accepted[name] = struct{}{}
-		values, rangeErr := s.client.ZRangeByScore(ctx, s.queueKey(name), &redislib.ZRangeBy{
+	}
+	ordered, err := s.loadDueCandidates(ctx, names, limit, now)
+	if err != nil {
+		return nil, err
+	}
+	claimed := make([]execution.Execution, 0, limit)
+	for _, candidate := range ordered {
+		if len(claimed) == limit {
+			break
+		}
+		result, won, claimErr := s.claimCandidate(ctx, candidate.ID, owner, accepted, lease, now)
+		if claimErr != nil {
+			return nil, claimErr
+		}
+		if !won {
+			continue
+		}
+		claimed = append(claimed, result)
+	}
+	return claimed, nil
+}
+
+// claimCandidate converts discovery into ownership. A false result is an expected race: the
+// candidate disappeared, became ineligible, or was claimed by another worker first.
+func (s *Store) claimCandidate(ctx context.Context, id uuid.UUID, owner string, accepted map[string]struct{}, lease time.Duration, now time.Time) (execution.Execution, bool, error) {
+	var result execution.Execution
+	err := s.watch(ctx, []string{s.executionKey(id)}, func(tx *redislib.Tx) error {
+		item, getErr := s.getExecutionTx(ctx, tx, id)
+		if getErr != nil {
+			return getErr
+		}
+		_, nameAccepted := accepted[item.TaskName]
+		claimable := item.Status == execution.StatusPending || item.Status == execution.StatusRetry ||
+			(item.Status == execution.StatusRunning && !item.LeaseUntil.After(now))
+		if !nameAccepted || !claimable || item.AvailableAt.After(now) || item.Attempt >= item.MaxAttempts {
+			return errUnavailable
+		}
+
+		previous := item.Status
+		item.Status, item.Attempt, item.LeaseOwner = execution.StatusRunning, item.Attempt+1, owner
+		item.LeaseToken, item.LeaseUntil = uuid.New(), now.Add(lease)
+		if item.StartedAt == nil {
+			item.StartedAt = new(now)
+		}
+		if getErr = s.saveTransition(ctx, tx, item, previous, execution.EventStarted, "", now, true); getErr != nil {
+			return getErr
+		}
+		result = item
+		return nil
+	})
+	if errors.Is(err, errUnavailable) || errors.Is(err, execution.ErrNotFound) {
+		return execution.Execution{}, false, nil
+	}
+	return result, err == nil, err
+}
+
+// loadDueCandidates merges the due heads of all requested task queues. Reading more than limit
+// leaves room for candidates lost to another worker between discovery and WATCH.
+func (s *Store) loadDueCandidates(ctx context.Context, names []string, limit int, now time.Time) ([]execution.Execution, error) {
+	candidates := make(map[uuid.UUID]execution.Execution)
+	for _, name := range names {
+		values, err := s.client.ZRangeByScore(ctx, s.queueKey(name), &redislib.ZRangeBy{
 			Min: "-inf", Max: fmt.Sprint(score(now)), Count: int64(max(limit*8, 128)),
 		}).Result()
-		if rangeErr != nil {
-			return nil, rangeErr
+		if err != nil {
+			return nil, err
 		}
 		for _, value := range values {
 			id, parseErr := uuid.Parse(value)
@@ -210,6 +294,7 @@ func (s *Store) Claim(ctx context.Context, owner string, names []string, limit i
 			}
 			item, getErr := s.GetExecution(ctx, id)
 			if errors.Is(getErr, execution.ErrNotFound) {
+				// A missing source record means the derived queue entry is stale and safe to discard.
 				_ = s.client.ZRem(ctx, s.queueKey(name), value).Err()
 				continue
 			}
@@ -219,6 +304,7 @@ func (s *Store) Claim(ctx context.Context, owner string, names []string, limit i
 			candidates[id] = item
 		}
 	}
+
 	ordered := make([]execution.Execution, 0, len(candidates))
 	for _, item := range candidates {
 		ordered = append(ordered, item)
@@ -229,46 +315,11 @@ func (s *Store) Claim(ctx context.Context, owner string, names []string, limit i
 		}
 		return ordered[i].AvailableAt.Before(ordered[j].AvailableAt)
 	})
-	claimed := make([]execution.Execution, 0, limit)
-	for _, candidate := range ordered {
-		if len(claimed) == limit {
-			break
-		}
-		var result execution.Execution
-		claimErr := s.watch(ctx, []string{s.executionKey(candidate.ID)}, func(tx *redislib.Tx) error {
-			item, getErr := s.getExecutionTx(ctx, tx, candidate.ID)
-			if getErr != nil {
-				return getErr
-			}
-			_, nameAccepted := accepted[item.TaskName]
-			claimable := item.Status == execution.StatusPending || item.Status == execution.StatusRetry ||
-				(item.Status == execution.StatusRunning && !item.LeaseUntil.After(now))
-			if !nameAccepted || !claimable || item.AvailableAt.After(now) || item.Attempt >= item.MaxAttempts {
-				return errUnavailable
-			}
-			previous := item.Status
-			item.Status, item.Attempt, item.LeaseOwner = execution.StatusRunning, item.Attempt+1, owner
-			item.LeaseToken, item.LeaseUntil = uuid.New(), now.Add(lease)
-			if item.StartedAt == nil {
-				item.StartedAt = new(now)
-			}
-			if txErr := s.saveTransition(ctx, tx, item, previous, execution.EventStarted, "", now, true); txErr != nil {
-				return txErr
-			}
-			result = item
-			return nil
-		})
-		if errors.Is(claimErr, errUnavailable) || errors.Is(claimErr, execution.ErrNotFound) {
-			continue
-		}
-		if claimErr != nil {
-			return nil, claimErr
-		}
-		claimed = append(claimed, result)
-	}
-	return claimed, nil
+	return ordered, nil
 }
 
+// ReapExpired terminally fails final attempts whose worker lease expired.
+// Non-final expired attempts stay in the task queue and can be claimed by another worker.
 func (s *Store) ReapExpired(ctx context.Context) ([]uuid.UUID, error) {
 	now, err := s.now(ctx)
 	if err != nil {
@@ -284,36 +335,8 @@ func (s *Store) ReapExpired(ctx context.Context) ([]uuid.UUID, error) {
 		if parseErr != nil {
 			return nil, parseErr
 		}
-		var runID *uuid.UUID
-		reapErr := s.watch(ctx, []string{s.executionKey(id)}, func(tx *redislib.Tx) error {
-			item, getErr := s.getExecutionTx(ctx, tx, id)
-			if errors.Is(getErr, execution.ErrNotFound) {
-				_, getErr = tx.TxPipelined(ctx, func(pipe redislib.Pipeliner) error {
-					pipe.ZRem(ctx, s.leasesKey(), id.String())
-					return nil
-				})
-				return getErr
-			}
-			if getErr != nil {
-				return getErr
-			}
-			if item.Status != execution.StatusRunning || item.LeaseUntil.After(now) {
-				return errUnavailable
-			}
-			if item.Attempt < item.MaxAttempts {
-				_, getErr = tx.TxPipelined(ctx, func(pipe redislib.Pipeliner) error {
-					pipe.ZRem(ctx, s.leasesKey(), id.String())
-					return nil
-				})
-				return getErr
-			}
-			previous := item.Status
-			item.Status, item.LastError, item.FinishedAt = execution.StatusFailed, "lease expired after maximum attempts", new(now)
-			clearLease(&item)
-			runID = cloneUUID(item.PipelineRunID)
-			return s.saveTransition(ctx, tx, item, previous, execution.EventFailed, item.LastError, now, false)
-		})
-		if reapErr != nil && !errors.Is(reapErr, errUnavailable) && !errors.Is(reapErr, execution.ErrNotFound) {
+		runID, reapErr := s.reapCandidate(ctx, id, now)
+		if reapErr != nil {
 			return nil, reapErr
 		}
 		if runID != nil {
@@ -327,6 +350,49 @@ func (s *Store) ReapExpired(ctx context.Context) ([]uuid.UUID, error) {
 	return result, nil
 }
 
+// reapCandidate removes a stale lease index for recoverable attempts. Only the final expired
+// attempt becomes failed; its pipeline ID is returned so the worker can advance the run.
+func (s *Store) reapCandidate(ctx context.Context, id uuid.UUID, now time.Time) (*uuid.UUID, error) {
+	var runID *uuid.UUID
+	err := s.watch(ctx, []string{s.executionKey(id)}, func(tx *redislib.Tx) error {
+		item, getErr := s.getExecutionTx(ctx, tx, id)
+		if errors.Is(getErr, execution.ErrNotFound) {
+			return s.removeLeaseIndex(ctx, tx, id)
+		}
+		if getErr != nil {
+			return getErr
+		}
+		if item.Status != execution.StatusRunning {
+			return s.removeLeaseIndex(ctx, tx, id)
+		}
+		if item.LeaseUntil.After(now) {
+			return errUnavailable
+		}
+		if item.Attempt < item.MaxAttempts {
+			return s.removeLeaseIndex(ctx, tx, id)
+		}
+
+		previous := item.Status
+		item.Status, item.LastError, item.FinishedAt = execution.StatusFailed, "lease expired after maximum attempts", new(now)
+		clearLease(&item)
+		runID = cloneUUID(item.PipelineRunID)
+		return s.saveTransition(ctx, tx, item, previous, execution.EventFailed, item.LastError, now, false)
+	})
+	if errors.Is(err, errUnavailable) {
+		return nil, nil
+	}
+	return runID, err
+}
+
+func (s *Store) removeLeaseIndex(ctx context.Context, tx *redislib.Tx, id uuid.UUID) error {
+	_, err := tx.TxPipelined(ctx, func(pipe redislib.Pipeliner) error {
+		pipe.ZRem(ctx, s.leasesKey(), id.String())
+		return nil
+	})
+	return err
+}
+
+// Heartbeat extends an owned execution lease and moves both deadline indexes atomically.
 func (s *Store) Heartbeat(ctx context.Context, id, token uuid.UUID, lease time.Duration) error {
 	now, err := s.now(ctx)
 	if err != nil {
@@ -355,6 +421,7 @@ func (s *Store) Heartbeat(ctx context.Context, id, token uuid.UUID, lease time.D
 	})
 }
 
+// Succeed records the task output, releases its lease, and removes it from delivery indexes.
 func (s *Store) Succeed(ctx context.Context, id, token uuid.UUID, output json.RawMessage) error {
 	return s.transition(ctx, id, token, func(item *execution.Execution, now time.Time) (execution.EventType, string, bool) {
 		item.Status, item.Output, item.FinishedAt = execution.StatusSucceeded, cloneJSON(output), new(now)
@@ -363,6 +430,7 @@ func (s *Store) Succeed(ctx context.Context, id, token uuid.UUID, output json.Ra
 	})
 }
 
+// Retry reschedules an owned execution, or fails it when its attempt budget is exhausted.
 func (s *Store) Retry(ctx context.Context, id, token uuid.UUID, errorText string, availableAt time.Time) error {
 	return s.transition(ctx, id, token, func(item *execution.Execution, now time.Time) (execution.EventType, string, bool) {
 		item.LastError = errorText
@@ -376,6 +444,7 @@ func (s *Store) Retry(ctx context.Context, id, token uuid.UUID, errorText string
 	})
 }
 
+// Fail terminally records a permanent task error.
 func (s *Store) Fail(ctx context.Context, id, token uuid.UUID, errorText string) error {
 	return s.transition(ctx, id, token, func(item *execution.Execution, now time.Time) (execution.EventType, string, bool) {
 		item.Status, item.LastError, item.FinishedAt = execution.StatusFailed, errorText, new(now)
@@ -384,6 +453,7 @@ func (s *Store) Fail(ctx context.Context, id, token uuid.UUID, errorText string)
 	})
 }
 
+// transition applies a lease-token-guarded mutation to a running execution.
 func (s *Store) transition(ctx context.Context, id, token uuid.UUID, mutate func(*execution.Execution, time.Time) (execution.EventType, string, bool)) error {
 	now, err := s.now(ctx)
 	if err != nil {
@@ -403,6 +473,7 @@ func (s *Store) transition(ctx context.Context, id, token uuid.UUID, mutate func
 	})
 }
 
+// CancelExecution invalidates the lease and prevents any pending delivery.
 func (s *Store) CancelExecution(ctx context.Context, id uuid.UUID, reason string) error {
 	now, err := s.now(ctx)
 	if err != nil {
@@ -423,6 +494,7 @@ func (s *Store) CancelExecution(ctx context.Context, id uuid.UUID, reason string
 	})
 }
 
+// RestartExecution reuses the execution identity and history while resetting mutable attempt state.
 func (s *Store) RestartExecution(ctx context.Context, id uuid.UUID, availableAt time.Time) (execution.Execution, error) {
 	now, err := s.now(ctx)
 	if err != nil {
@@ -474,6 +546,7 @@ func (s *Store) RestartExecution(ctx context.Context, id uuid.UUID, availableAt 
 	return result, err
 }
 
+// Events returns the append-only transition history in insertion order.
 func (s *Store) Events(ctx context.Context, id uuid.UUID) ([]execution.Event, error) {
 	if _, err := s.GetExecution(ctx, id); err != nil {
 		return nil, err
@@ -493,109 +566,14 @@ func (s *Store) Events(ctx context.Context, id uuid.UUID) ([]execution.Event, er
 	return items, nil
 }
 
-func (s *Store) CreatePipelineRun(ctx context.Context, request execution.CreatePipelineRun) (execution.PipelineRun, error) {
-	now, err := s.now(ctx)
-	if err != nil {
-		return execution.PipelineRun{}, err
-	}
-	run := execution.PipelineRun{ID: uuid.New(), PipelineName: request.PipelineName, PipelineVersion: request.PipelineVersion, Input: cloneJSON(request.Input), Status: execution.RunPending, CreatedAt: now, UpdatedAt: now}
-	_, err = s.client.TxPipelined(ctx, func(pipe redislib.Pipeliner) error {
-		pipe.HSet(ctx, s.pipelineKey(run.ID), encodeRun(run))
-		pipe.ZAdd(ctx, s.runsKey(), redislib.Z{Score: score(now), Member: run.ID.String()})
-		pipe.ZAdd(ctx, s.runStatusKey(run.Status), redislib.Z{Score: score(now), Member: run.ID.String()})
-		return nil
-	})
-	return run, err
-}
-
-func (s *Store) GetPipelineRun(ctx context.Context, id uuid.UUID) (execution.PipelineRun, error) {
-	values, err := s.client.HGetAll(ctx, s.pipelineKey(id)).Result()
-	if err != nil {
-		return execution.PipelineRun{}, err
-	}
-	if len(values) == 0 {
-		return execution.PipelineRun{}, execution.ErrNotFound
-	}
-	return decodeRun(values)
-}
-
-func (s *Store) ListPipelineRuns(ctx context.Context, statuses []execution.RunStatus) ([]execution.PipelineRun, error) {
-	ids := make(map[string]struct{})
-	if len(statuses) == 0 {
-		values, err := s.client.ZRevRange(ctx, s.runsKey(), 0, -1).Result()
-		if err != nil {
-			return nil, err
-		}
-		for _, value := range values {
-			ids[value] = struct{}{}
-		}
-	} else {
-		for _, status := range statuses {
-			values, err := s.client.ZRevRange(ctx, s.runStatusKey(status), 0, -1).Result()
-			if err != nil {
-				return nil, err
-			}
-			for _, value := range values {
-				ids[value] = struct{}{}
-			}
-		}
-	}
-	items := make([]execution.PipelineRun, 0, len(ids))
-	for value := range ids {
-		id, err := uuid.Parse(value)
-		if err != nil {
-			return nil, err
-		}
-		run, err := s.GetPipelineRun(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, run)
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
-	return items, nil
-}
-
-func (s *Store) SetPipelineRunStatus(ctx context.Context, id uuid.UUID, status execution.RunStatus, errorText string) error {
-	now, err := s.now(ctx)
-	if err != nil {
-		return err
-	}
-	return s.watch(ctx, []string{s.pipelineKey(id)}, func(tx *redislib.Tx) error {
-		values, getErr := tx.HGetAll(ctx, s.pipelineKey(id)).Result()
-		if getErr != nil {
-			return getErr
-		}
-		if len(values) == 0 {
-			return execution.ErrNotFound
-		}
-		run, getErr := decodeRun(values)
-		if getErr != nil {
-			return getErr
-		}
-		previous := run.Status
-		run.Status, run.Error, run.UpdatedAt = status, errorText, now
-		if status == execution.RunSucceeded || status == execution.RunFailed || status == execution.RunCancelled {
-			run.FinishedAt = new(now)
-		} else {
-			run.FinishedAt = nil
-		}
-		_, getErr = tx.TxPipelined(ctx, func(pipe redislib.Pipeliner) error {
-			pipe.HSet(ctx, s.pipelineKey(id), encodeRun(run))
-			pipe.ZRem(ctx, s.runStatusKey(previous), id.String())
-			pipe.ZAdd(ctx, s.runStatusKey(status), redislib.Z{Score: score(run.CreatedAt), Member: id.String()})
-			return nil
-		})
-		return getErr
-	})
-}
-
 var (
 	errExisting    = errors.New("redis execution reference already exists")
 	errUnavailable = errors.New("redis execution is not claimable")
 )
 
-func (s *Store) saveTransition(ctx context.Context, tx *redislib.Tx, item execution.Execution, previous execution.Status, eventType execution.EventType, errorText string, now time.Time, queued bool) error {
+// saveTransition must be called inside WATCH. It keeps the record, queue, lease, status index, and
+// event list consistent in one MULTI/EXEC transaction.
+func (s *Store) saveTransition(ctx context.Context, tx *redislib.Tx, item execution.Execution, previous execution.Status, eventType execution.EventType, errorText string, now time.Time, keepInQueue bool) error {
 	encoded, err := json.Marshal(item)
 	if err != nil {
 		return err
@@ -609,7 +587,7 @@ func (s *Store) saveTransition(ctx context.Context, tx *redislib.Tx, item execut
 		pipe.ZRem(ctx, s.statusKey(previous), item.ID.String())
 		pipe.ZAdd(ctx, s.statusKey(item.Status), redislib.Z{Score: score(item.CreatedAt), Member: item.ID.String()})
 		pipe.ZRem(ctx, s.leasesKey(), item.ID.String())
-		if queued {
+		if keepInQueue {
 			queueAt := item.AvailableAt
 			if item.Status == execution.StatusRunning {
 				queueAt = item.LeaseUntil
@@ -648,6 +626,8 @@ func (s *Store) getExecutionTx(ctx context.Context, tx *redislib.Tx, id uuid.UUI
 	return item, nil
 }
 
+// watch retries optimistic transactions when another process changes a watched source record.
+// The bound avoids an unbounded busy loop under sustained contention.
 func (s *Store) watch(ctx context.Context, keys []string, operation func(*redislib.Tx) error) error {
 	for range 16 {
 		err := s.client.Watch(ctx, operation, keys...)
@@ -658,95 +638,8 @@ func (s *Store) watch(ctx context.Context, keys []string, operation func(*redisl
 	return errors.New("redis transaction contention limit exceeded")
 }
 
+// now returns server time, which is the shared clock for all distributed workers.
 func (s *Store) now(ctx context.Context) (time.Time, error) {
 	value, err := s.client.Time(ctx).Result()
 	return value.UTC(), err
-}
-
-func encodeRun(run execution.PipelineRun) map[string]any {
-	finished := ""
-	if run.FinishedAt != nil {
-		finished = run.FinishedAt.UTC().Format(time.RFC3339Nano)
-	}
-	return map[string]any{
-		"id": run.ID.String(), "pipeline_name": run.PipelineName, "pipeline_version": run.PipelineVersion,
-		"input": string(run.Input), "status": string(run.Status), "error": run.Error,
-		"created_at": run.CreatedAt.UTC().Format(time.RFC3339Nano), "updated_at": run.UpdatedAt.UTC().Format(time.RFC3339Nano),
-		"finished_at": finished,
-	}
-}
-
-func decodeRun(values map[string]string) (execution.PipelineRun, error) {
-	id, err := uuid.Parse(values["id"])
-	if err != nil {
-		return execution.PipelineRun{}, err
-	}
-	version := 0
-	if _, err = fmt.Sscan(values["pipeline_version"], &version); err != nil {
-		return execution.PipelineRun{}, err
-	}
-	created, err := time.Parse(time.RFC3339Nano, values["created_at"])
-	if err != nil {
-		return execution.PipelineRun{}, err
-	}
-	updated, err := time.Parse(time.RFC3339Nano, values["updated_at"])
-	if err != nil {
-		return execution.PipelineRun{}, err
-	}
-	run := execution.PipelineRun{
-		ID: id, PipelineName: values["pipeline_name"], PipelineVersion: version,
-		Input: json.RawMessage(values["input"]), Status: execution.RunStatus(values["status"]), Error: values["error"],
-		CreatedAt: created, UpdatedAt: updated,
-	}
-	if values["finished_at"] != "" {
-		finished, parseErr := time.Parse(time.RFC3339Nano, values["finished_at"])
-		if parseErr != nil {
-			return execution.PipelineRun{}, parseErr
-		}
-		run.FinishedAt = &finished
-	}
-	return run, nil
-}
-
-func clearLease(item *execution.Execution) {
-	item.LeaseOwner, item.LeaseToken, item.LeaseUntil = "", uuid.Nil, time.Time{}
-}
-
-func score(value time.Time) float64 { return float64(value.UnixMilli()) }
-func cloneJSON(value json.RawMessage) json.RawMessage {
-	return append(json.RawMessage(nil), value...)
-}
-func cloneUUID(value *uuid.UUID) *uuid.UUID {
-	if value == nil {
-		return nil
-	}
-	return new(*value)
-}
-
-func encodeKey(value string) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(value))
-}
-
-func (s *Store) executionKey(id uuid.UUID) string { return s.prefix + "execution:" + id.String() }
-func (s *Store) eventsKey(id uuid.UUID) string    { return s.prefix + "events:" + id.String() }
-func (s *Store) executionsKey() string            { return s.prefix + "executions" }
-func (s *Store) leasesKey() string                { return s.prefix + "leases" }
-func (s *Store) queueKey(name string) string      { return s.prefix + "queue:" + encodeKey(name) }
-func (s *Store) taskIndexKey(name string) string  { return s.prefix + "task:" + encodeKey(name) }
-func (s *Store) statusKey(status execution.Status) string {
-	return s.prefix + "status:" + string(status)
-}
-func (s *Store) idempotencyKey(taskName, key string) string {
-	return s.prefix + "idempotency:" + encodeKey(taskName+"\x00"+key)
-}
-func (s *Store) nodeKey(runID uuid.UUID, node string) string {
-	return s.prefix + "node:" + runID.String() + ":" + encodeKey(node)
-}
-func (s *Store) runExecutionsKey(id uuid.UUID) string {
-	return s.prefix + "run-executions:" + id.String()
-}
-func (s *Store) pipelineKey(id uuid.UUID) string { return s.prefix + "pipeline:" + id.String() }
-func (s *Store) runsKey() string                 { return s.prefix + "pipelines" }
-func (s *Store) runStatusKey(status execution.RunStatus) string {
-	return s.prefix + "pipeline-status:" + string(status)
 }

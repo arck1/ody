@@ -37,29 +37,31 @@ func New[Input any](name string, version int) *Definition[Input] {
 	return &Definition[Input]{name: strings.TrimSpace(name), version: version}
 }
 
+// Name and Version form the durable identity used to resume a stored pipeline run.
 func (d *Definition[I]) Name() string { return d.name }
 func (d *Definition[I]) Version() int { return d.version }
 
 // Start adds a root node whose input is derived from the pipeline input.
 func Start[P, I, O any](pipeline *Definition[P], key string, definition task.Definition[I, O], mapper func(P) I) Node[O] {
-	node := Node[O]{key: key, pipelineName: pipeline.name, pipelineVersion: pipeline.version}
+	node := reference[O](pipeline, key)
 	validationErr := definition.Validate()
 	if mapper == nil {
 		validationErr = errors.New("pipeline node mapper is nil")
 	}
-	pipeline.nodes = append(pipeline.nodes, &nodeDefinition{key: key, taskName: definition.Name(), taskVersion: definition.Version(), maxAttempts: definition.MaxAttempts(), err: validationErr, buildInput: func(initial json.RawMessage, _ map[string]json.RawMessage) (json.RawMessage, error) {
-		var input P
-		if err := json.Unmarshal(initial, &input); err != nil {
-			return nil, err
-		}
-		return json.Marshal(mapper(input))
-	}})
+	pipeline.nodes = append(pipeline.nodes, newNode(key, definition, nil, validationErr,
+		func(initial json.RawMessage, _ map[string]json.RawMessage) (json.RawMessage, error) {
+			var input P
+			if err := json.Unmarshal(initial, &input); err != nil {
+				return nil, err
+			}
+			return json.Marshal(mapper(input))
+		}))
 	return node
 }
 
 // Then adds a node whose input is derived from one predecessor's stored output.
 func Then[P, Previous, I, O any](pipeline *Definition[P], previous Node[Previous], key string, definition task.Definition[I, O], mapper func(Previous) I) Node[O] {
-	node := Node[O]{key: key, pipelineName: pipeline.name, pipelineVersion: pipeline.version}
+	node := reference[O](pipeline, key)
 	validationErr := definition.Validate()
 	if mapper == nil {
 		validationErr = errors.New("pipeline node mapper is nil")
@@ -67,38 +69,63 @@ func Then[P, Previous, I, O any](pipeline *Definition[P], previous Node[Previous
 	if previous.pipelineName != pipeline.name || previous.pipelineVersion != pipeline.version {
 		validationErr = errors.New("pipeline node dependency belongs to another pipeline")
 	}
-	pipeline.nodes = append(pipeline.nodes, &nodeDefinition{key: key, taskName: definition.Name(), taskVersion: definition.Version(), maxAttempts: definition.MaxAttempts(), dependencies: []string{previous.key}, err: validationErr, buildInput: func(_ json.RawMessage, outputs map[string]json.RawMessage) (json.RawMessage, error) {
-		var value Previous
-		if err := json.Unmarshal(outputs[previous.key], &value); err != nil {
-			return nil, err
-		}
-		return json.Marshal(mapper(value))
-	}})
+	pipeline.nodes = append(pipeline.nodes, newNode(key, definition, []string{previous.key}, validationErr,
+		func(_ json.RawMessage, outputs map[string]json.RawMessage) (json.RawMessage, error) {
+			var value Previous
+			if err := json.Unmarshal(outputs[previous.key], &value); err != nil {
+				return nil, err
+			}
+			return json.Marshal(mapper(value))
+		}))
 	return node
 }
 
 // Join2 adds a fan-in node derived from two predecessor outputs.
 func Join2[P, A, B, I, O any](pipeline *Definition[P], first Node[A], second Node[B], key string, definition task.Definition[I, O], mapper func(A, B) I) Node[O] {
-	node := Node[O]{key: key, pipelineName: pipeline.name, pipelineVersion: pipeline.version}
+	node := reference[O](pipeline, key)
 	validationErr := definition.Validate()
 	if mapper == nil {
 		validationErr = errors.New("pipeline node mapper is nil")
 	}
-	if first.pipelineName != pipeline.name || second.pipelineName != pipeline.name || first.pipelineVersion != pipeline.version || second.pipelineVersion != pipeline.version {
+	if !belongsTo(pipeline, first) || !belongsTo(pipeline, second) {
 		validationErr = errors.New("pipeline node dependency belongs to another pipeline")
 	}
-	pipeline.nodes = append(pipeline.nodes, &nodeDefinition{key: key, taskName: definition.Name(), taskVersion: definition.Version(), maxAttempts: definition.MaxAttempts(), dependencies: []string{first.key, second.key}, err: validationErr, buildInput: func(_ json.RawMessage, outputs map[string]json.RawMessage) (json.RawMessage, error) {
-		var a A
-		if err := json.Unmarshal(outputs[first.key], &a); err != nil {
-			return nil, err
-		}
-		var b B
-		if err := json.Unmarshal(outputs[second.key], &b); err != nil {
-			return nil, err
-		}
-		return json.Marshal(mapper(a, b))
-	}})
+	pipeline.nodes = append(pipeline.nodes, newNode(key, definition, []string{first.key, second.key}, validationErr,
+		func(_ json.RawMessage, outputs map[string]json.RawMessage) (json.RawMessage, error) {
+			var a A
+			if err := json.Unmarshal(outputs[first.key], &a); err != nil {
+				return nil, err
+			}
+			var b B
+			if err := json.Unmarshal(outputs[second.key], &b); err != nil {
+				return nil, err
+			}
+			return json.Marshal(mapper(a, b))
+		}))
 	return node
+}
+
+func reference[O, P any](pipeline *Definition[P], key string) Node[O] {
+	return Node[O]{key: key, pipelineName: pipeline.name, pipelineVersion: pipeline.version}
+}
+
+func belongsTo[P, O any](pipeline *Definition[P], node Node[O]) bool {
+	return node.pipelineName == pipeline.name && node.pipelineVersion == pipeline.version
+}
+
+// newNode is the single type-erasure boundary between public generic definitions and the durable
+// runtime DAG. Input conversion remains in buildInput and is evaluated only when dependencies have
+// durably succeeded.
+func newNode[I, O any](key string, definition task.Definition[I, O], dependencies []string, validationErr error, buildInput func(json.RawMessage, map[string]json.RawMessage) (json.RawMessage, error)) *nodeDefinition {
+	return &nodeDefinition{
+		key:          key,
+		taskName:     definition.Name(),
+		taskVersion:  definition.Version(),
+		maxAttempts:  definition.MaxAttempts(),
+		dependencies: dependencies,
+		buildInput:   buildInput,
+		err:          validationErr,
+	}
 }
 
 func (d *Definition[I]) validate() error {
@@ -108,6 +135,8 @@ func (d *Definition[I]) validate() error {
 	if d.version <= 0 {
 		return fmt.Errorf("pipeline %q version must be positive", d.name)
 	}
+	// Declaration order is topological order. Requiring predecessors to be seen makes forward
+	// dependencies impossible and keeps runtime scheduling deterministic.
 	seen := map[string]struct{}{}
 	for _, node := range d.nodes {
 		if node.err != nil {

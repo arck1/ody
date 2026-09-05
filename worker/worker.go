@@ -16,20 +16,28 @@ import (
 )
 
 type Advancer interface {
+	// Advance reconciles a pipeline after one of its node executions changes state.
 	Advance(context.Context, uuid.UUID) error
 }
 
 type reconciler interface{ Reconcile(context.Context) error }
 
 type Options struct {
-	ID                string
-	Concurrency       int
-	PollInterval      time.Duration
-	LeaseDuration     time.Duration
+	// ID is persisted as LeaseOwner and should identify one worker process.
+	ID string
+	// Concurrency is the number of independent claim-and-execute loops.
+	Concurrency int
+	// PollInterval is used only when no execution could be claimed or the Store returned an error.
+	PollInterval time.Duration
+	// LeaseDuration controls when another worker may reclaim an abandoned execution.
+	LeaseDuration time.Duration
+	// HeartbeatInterval controls lease renewal and must be shorter than LeaseDuration.
 	HeartbeatInterval time.Duration
 }
 
+// Observer receives completed worker decisions. Implementations must avoid blocking the worker.
 type Observer interface {
+	// Transition reports the intended status and the handler or persistence error that caused it.
 	Transition(context.Context, execution.Execution, execution.Status, error)
 }
 type nopObserver struct{}
@@ -87,6 +95,7 @@ func (w *Worker) Run(ctx context.Context) error {
 
 func (w *Worker) loop(ctx context.Context) {
 	for ctx.Err() == nil {
+		// Reaping before claiming prevents exhausted crashed deliveries from blocking the queue head.
 		runs, _ := w.store.ReapExpired(ctx)
 		for _, runID := range runs {
 			if w.advancer != nil {
@@ -122,6 +131,8 @@ func (w *Worker) execute(workerCtx context.Context, item execution.Execution) {
 		handlerCtx, cancel = context.WithCancel(workerCtx)
 	}
 	defer cancel()
+	// The buffer lets a late handler finish without blocking while the worker has already resolved a
+	// timeout or shutdown. Go cannot forcibly stop a handler; it must still honor its context.
 	resultCh := make(chan result, 1)
 	go func() {
 		output, err := w.registry.Execute(handlerCtx, item)

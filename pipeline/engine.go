@@ -71,6 +71,8 @@ func (e *Engine) Advance(ctx context.Context, runID uuid.UUID) error {
 	if err != nil {
 		return err
 	}
+	// Rebuild runtime state exclusively from persisted executions. This is what makes Advance safe
+	// after a process restart and prevents in-memory results from becoming a hidden dependency.
 	byNode := make(map[string]execution.Execution, len(executions))
 	outputs := make(map[string]json.RawMessage)
 	for _, item := range executions {
@@ -102,7 +104,13 @@ func (e *Engine) Advance(ctx context.Context, runID uuid.UUID) error {
 			_ = e.store.SetPipelineRunStatus(ctx, runID, execution.RunFailed, fmt.Sprintf("build node %s input: %v", node.key, buildErr))
 			return buildErr
 		}
-		_, err = e.store.CreateExecution(ctx, execution.CreateExecution{TaskName: node.taskName, TaskVersion: node.taskVersion, Input: input, MaxAttempts: node.maxAttempts, PipelineRunID: &runID, NodeKey: node.key, IdempotencyKey: runID.String() + ":" + node.key})
+		request := execution.CreateExecution{
+			TaskName: node.taskName, TaskVersion: node.taskVersion,
+			Input: input, MaxAttempts: node.maxAttempts,
+			PipelineRunID: &runID, NodeKey: node.key,
+			IdempotencyKey: runID.String() + ":" + node.key,
+		}
+		_, err = e.store.CreateExecution(ctx, request)
 		if err != nil {
 			return err
 		}

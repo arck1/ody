@@ -14,6 +14,7 @@ import (
 
 var ErrEmptyName = errors.New("task name is empty")
 
+// RetryPolicy returns the delay after a completed attempt. attempt starts at one.
 type RetryPolicy func(attempt int) time.Duration
 
 type specification struct {
@@ -29,14 +30,26 @@ type Definition[Input, Output any] struct{ spec specification }
 
 type Option func(*specification)
 
-func WithVersion(version int) Option            { return func(s *specification) { s.version = version } }
-func WithMaxAttempts(attempts int) Option       { return func(s *specification) { s.maxAttempts = attempts } }
-func WithTimeout(timeout time.Duration) Option  { return func(s *specification) { s.timeout = timeout } }
+// WithVersion changes the durable task contract version.
+func WithVersion(version int) Option { return func(s *specification) { s.version = version } }
+
+// WithMaxAttempts includes the first delivery and all subsequent retries.
+func WithMaxAttempts(attempts int) Option { return func(s *specification) { s.maxAttempts = attempts } }
+
+// WithTimeout limits one handler attempt, not the lifetime of the durable execution.
+func WithTimeout(timeout time.Duration) Option { return func(s *specification) { s.timeout = timeout } }
+
+// WithRetryPolicy controls delays when a handler returns an ordinary error.
 func WithRetryPolicy(policy RetryPolicy) Option { return func(s *specification) { s.retry = policy } }
 
 // New creates a typed task definition.
 func New[Input, Output any](name string, options ...Option) Definition[Input, Output] {
-	spec := specification{name: strings.TrimSpace(name), version: 1, maxAttempts: 3, retry: ExponentialBackoff(100*time.Millisecond, 30*time.Second)}
+	spec := specification{
+		name:        strings.TrimSpace(name),
+		version:     1,
+		maxAttempts: 3,
+		retry:       ExponentialBackoff(100*time.Millisecond, 30*time.Second),
+	}
 	for _, option := range options {
 		if option != nil {
 			option(&spec)
@@ -86,7 +99,10 @@ func (d Definition[I, O]) Enqueue(ctx context.Context, store ExecutionCreator, i
 	if err != nil {
 		return execution.Execution{}, err
 	}
-	request := execution.CreateExecution{TaskName: d.Name(), TaskVersion: d.Version(), Input: raw, MaxAttempts: d.MaxAttempts(), AvailableAt: time.Now().UTC()}
+	request := execution.CreateExecution{
+		TaskName: d.Name(), TaskVersion: d.Version(), Input: raw,
+		MaxAttempts: d.MaxAttempts(), AvailableAt: time.Now().UTC(),
+	}
 	for _, option := range options {
 		if option != nil {
 			option(&request)

@@ -15,6 +15,7 @@ import (
 
 var ErrUnknownTask = errors.New("unknown task")
 
+// Message is the typed handler input plus delivery metadata for the current attempt.
 type Message[I any] struct {
 	ExecutionID string
 	Input       I
@@ -24,6 +25,7 @@ type Message[I any] struct {
 
 type Handler[I, O any] func(context.Context, Message[I]) (O, error)
 
+// Permanent marks an error as non-retryable.
 func Permanent(err error) error {
 	if err == nil {
 		return nil
@@ -35,8 +37,12 @@ type permanentError struct{ error }
 
 func (e permanentError) Unwrap() error { return e.error }
 
-func IsPermanent(err error) bool { var target permanentError; return errors.As(err, &target) }
+func IsPermanent(err error) bool {
+	var target permanentError
+	return errors.As(err, &target)
+}
 
+// RetryAfter overrides the definition's retry policy for one failed attempt.
 func RetryAfter(err error, delay time.Duration) error {
 	if err == nil {
 		return nil
@@ -79,7 +85,10 @@ func Handle[I, O any](definition Definition[I, O], handler Handler[I, O]) Bindin
 	if handler == nil {
 		return Binding{err: errors.New("task handler is nil")}
 	}
-	d := descriptor{name: definition.Name(), version: definition.Version(), maxAttempts: definition.MaxAttempts(), timeout: definition.Timeout(), retry: definition.spec.retry}
+	d := descriptor{
+		name: definition.Name(), version: definition.Version(), maxAttempts: definition.MaxAttempts(),
+		timeout: definition.Timeout(), retry: definition.spec.retry,
+	}
 	d.execute = func(ctx context.Context, item execution.Execution) (output json.RawMessage, err error) {
 		defer func() {
 			if recovered := recover(); recovered != nil {
@@ -90,7 +99,11 @@ func Handle[I, O any](definition Definition[I, O], handler Handler[I, O]) Bindin
 		if err = json.Unmarshal(item.Input, &input); err != nil {
 			return nil, Permanent(fmt.Errorf("decode task %q input: %w", d.name, err))
 		}
-		value, err := handler(ctx, Message[I]{ExecutionID: item.ID.String(), Input: input, Attempt: item.Attempt, MaxAttempts: item.MaxAttempts})
+		message := Message[I]{
+			ExecutionID: item.ID.String(), Input: input,
+			Attempt: item.Attempt, MaxAttempts: item.MaxAttempts,
+		}
+		value, err := handler(ctx, message)
 		if err != nil {
 			return nil, err
 		}
@@ -108,6 +121,7 @@ type Module struct {
 	bindings []Binding
 }
 
+// NewModule groups bindings by application capability and rejects duplicates inside the group.
 func NewModule(name string, bindings ...Binding) (Module, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {

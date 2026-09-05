@@ -63,6 +63,7 @@ func run(args []string) error {
 }
 
 func openStore(ctx context.Context, backend, dsn, redisURL, redisPrefix string) (execution.Store, func(), error) {
+	// Constructors borrow their clients, so this boundary also returns the matching ownership cleanup.
 	switch backend {
 	case "postgres":
 		if dsn == "" {

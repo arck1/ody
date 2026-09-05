@@ -1,4 +1,3 @@
-// Package postgres implements execution.Store with PostgreSQL.
 package postgres
 
 import (
@@ -19,6 +18,7 @@ import (
 //go:embed schema.sql
 var schema string
 
+// Store implements execution.Store using one application-owned SQL connection pool.
 type Store struct{ db *sql.DB }
 
 func New(db *sql.DB) (*Store, error) {
@@ -28,6 +28,7 @@ func New(db *sql.DB) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
+// Migrate applies the embedded schema. Every statement is safe to execute repeatedly.
 func (s *Store) Migrate(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, schema)
 	return err

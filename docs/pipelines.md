@@ -43,12 +43,15 @@ Root nodes могут выполняться параллельно. `Join2` с�
 ## Регистрация и запуск
 
 ```go
-pipelines, err := pipeline.NewRegistry(flow)
-engine, err := pipeline.NewEngine(store, pipelines)
+app, err := schedulor.New(store,
+    schedulor.Tasks(taskModule),
+    schedulor.Pipelines(flow),
+    schedulor.Observe(observer),
+    schedulor.WithWorker(workerOptions),
+)
 
-run, err := pipeline.Run(ctx, engine, flow, ImportInput{URL: url})
-
-runner, err := worker.New(store, taskRegistry, engine, observer, workerOptions)
+run, err := pipeline.Run(ctx, app.PipelineEngine(), flow, ImportInput{URL: url})
+err = app.Run(ctx)
 ```
 
 Все task definitions, используемые узлами, должны быть в task registry worker. Все активные версии
@@ -58,7 +61,7 @@ pipeline должны быть в pipeline registry каждого процес�
 ## Состояние и результат
 
 ```go
-snapshot, err := engine.Inspect(ctx, run.ID)
+snapshot, err := app.PipelineEngine().Inspect(ctx, run.ID)
 result, err := pipeline.Output(ctx, store, run.ID, indexed)
 ```
 
@@ -67,7 +70,8 @@ result, err := pipeline.Output(ctx, store, run.ID, indexed)
 ## Ошибки, отмена и восстановление
 
 - Failed/cancelled node переводит весь run в `failed` и не создаёт незапущенных descendants.
-- `engine.Cancel(ctx, runID, reason)` отменяет незавершённые nodes и сам run.
+- `app.PipelineEngine().Cancel(ctx, runID, reason)` отменяет незавершённые nodes и сам run.
+- `app.RestartExecution(ctx, executionID)` безопасно сбрасывает узел и существующих потомков.
 - Worker вызывает `Advance` после terminal transition node.
 - `engine.Reconcile(ctx)` продолжает `pending`/`running` pipelines после process crash между
   сохранением результата и созданием следующего узла.
@@ -84,4 +88,3 @@ version независимы.
 Restart pipeline node через monitoring API повторно открывает run. Уже успешные downstream nodes
 автоматически не сбрасываются; если бизнес-процесс требует полного replay, создавайте новый run или
 реализуйте отдельную стратегию reset для нужного подграфа.
-

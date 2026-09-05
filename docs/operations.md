@@ -2,13 +2,13 @@
 
 ## Standalone
 
-`worker.Run(ctx)` блокируется до отмены контекста:
+`schedulor.App.Run(ctx)` блокируется до отмены контекста:
 
 ```go
 ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 defer stop()
 
-if err := runner.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+if err := app.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
     return err
 }
 ```
@@ -18,22 +18,25 @@ if err := runner.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 
 ## Uber Fx
 
-Core worker не зависит от Fx. Подключите adapter:
+Fx создаёт тот же `schedulor.App`, который используется при standalone-запуске. Store предоставьте
+как интерфейс `execution.Store`:
 
 ```go
-runner, err := worker.New(store, tasks, engine, observer, options)
-lifecycle, err := workerfx.New(runner)
-
-app, err := schedulor.NewFxApp(schedulor.FxAppOptions{
-    Components: []schedulor.FxLifecycleComponent{lifecycle},
-    Options: []fx.Option{
-        fx.Provide(provideApplicationDependencies),
-    },
-})
+app := fx.New(
+    fx.Provide(
+        fx.Annotate(newStore, fx.As(new(execution.Store))),
+    ),
+    schedulor.FxModule(
+        schedulor.Tasks(emailModule),
+        schedulor.Pipelines(importPipeline),
+        schedulor.Observe(observer),
+        schedulor.WithWorker(options),
+    ),
+)
 app.Run()
 ```
 
-Fx adapter отменяет worker context на shutdown и ожидает остановки polling loops.
+Fx module отменяет worker context на shutdown и ожидает остановки polling loops.
 
 ## Prometheus
 

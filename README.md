@@ -27,13 +27,14 @@ module, err := task.NewModule("email",
 		return mailer.Send(ctx, message.Input)
 	}),
 )
-registry, err := task.NewRegistry(module)
-
 store := execution.NewMemoryStore()
-runner, err := worker.New(store, registry, nil, nil, worker.Options{Concurrency: 4})
+app, err := schedulor.New(store,
+	schedulor.Tasks(module),
+	schedulor.WithWorker(worker.Options{Concurrency: 4}),
+)
 
-created, err := sendEmail.Enqueue(ctx, store, EmailInput{To: "user@example.com"})
-err = runner.Run(ctx)
+created, err := sendEmail.Enqueue(ctx, app, EmailInput{To: "user@example.com"})
+err = app.Run(ctx)
 ```
 
 В production используйте `execution/postgres.Store` или `execution/redis.Store` и передавайте один

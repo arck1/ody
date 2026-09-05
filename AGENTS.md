@@ -51,14 +51,16 @@ when a new component does not need the full Store.
   reconciliation, cancellation, inspection, and output decoding.
 - `worker`: standalone concurrent worker with polling, timeout, lease heartbeat, retry, result
   persistence, observer callbacks, and pipeline advancement.
-- `worker/fx`: optional Fx lifecycle adapter; the base worker stays Fx-independent.
+- root `schedulor.App`: common standalone/Fx composition facade over Store, worker, and pipeline.
+- `worker/fx`: low-level Fx lifecycle adapter for custom worker assembly.
 - `monitoring`: transport-neutral read/control interfaces and service.
 - `monitoring/prometheus`: worker observer metrics and persisted-state collector.
 - `monitoring/httpui`: embedded operator dashboard and JSON API.
 - `cmd/schedulor-admin`: PostgreSQL-backed operational CLI and web server.
 - `functional`: public-API behavior suites; integration-tagged suites use real PostgreSQL and Redis.
 
-The root package only contains the optional Fx application assembly helper.
+The root package is the preferred composition API; low-level packages remain available for custom
+assembly.
 
 ## Execution invariants
 

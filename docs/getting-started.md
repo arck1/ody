@@ -96,7 +96,16 @@ if err != nil {
     return err
 }
 
-tasks, err := task.NewRegistry(emailModule)
+app, err := schedulor.New(store,
+    schedulor.Tasks(emailModule),
+    schedulor.WithWorker(worker.Options{
+        ID:                "email-worker-1",
+        Concurrency:       8,
+        PollInterval:      100 * time.Millisecond,
+        LeaseDuration:     30 * time.Second,
+        HeartbeatInterval: 10 * time.Second,
+    }),
+)
 if err != nil {
     return err
 }
@@ -105,7 +114,7 @@ if err != nil {
 ## 4. Поставьте задачу
 
 ```go
-created, err := SendEmail.Enqueue(ctx, store, EmailInput{
+created, err := SendEmail.Enqueue(ctx, app, EmailInput{
     To:      "user@example.com",
     Subject: "Your report is ready",
 }, task.WithIdempotencyKey("report-email:"+reportID))
@@ -119,7 +128,7 @@ log.Printf("execution id: %s", created.ID)
 Можно задать отложенный запуск:
 
 ```go
-created, err := SendEmail.Enqueue(ctx, store, input,
+created, err := SendEmail.Enqueue(ctx, app, input,
     task.WithAvailableAt(time.Now().UTC().Add(15*time.Minute)),
 )
 ```
@@ -127,18 +136,7 @@ created, err := SendEmail.Enqueue(ctx, store, input,
 ## 5. Запустите worker
 
 ```go
-runner, err := worker.New(store, tasks, nil, nil, worker.Options{
-    ID:                "email-worker-1",
-    Concurrency:       8,
-    PollInterval:      100 * time.Millisecond,
-    LeaseDuration:     30 * time.Second,
-    HeartbeatInterval: 10 * time.Second,
-})
-if err != nil {
-    return err
-}
-
-if err = runner.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+if err = app.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
     return err
 }
 ```

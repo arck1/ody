@@ -209,7 +209,7 @@ func (s *Store) ListRunExecutions(ctx context.Context, runID uuid.UUID) ([]execu
 // Candidates are discovered through per-task queue indexes, then claimed one at a time with WATCH.
 // Claiming one record per transaction keeps contention local: workers racing for the same task may
 // lose that candidate without rolling back other records they already claimed.
-func (s *Store) Claim(ctx context.Context, owner string, names []string, limit int, lease time.Duration) ([]execution.Execution, error) {
+func (s *Store) Claim(ctx context.Context, owner string, keys []execution.TaskKey, limit int, lease time.Duration) ([]execution.Execution, error) {
 	if limit <= 0 {
 		limit = 1
 	}
@@ -217,9 +217,15 @@ func (s *Store) Claim(ctx context.Context, owner string, names []string, limit i
 	if err != nil {
 		return nil, err
 	}
-	accepted := make(map[string]struct{}, len(names))
-	for _, name := range names {
-		accepted[name] = struct{}{}
+	accepted := make(map[execution.TaskKey]struct{}, len(keys))
+	names := make([]string, 0, len(keys))
+	seenNames := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		accepted[key] = struct{}{}
+		if _, exists := seenNames[key.Name]; !exists {
+			seenNames[key.Name] = struct{}{}
+			names = append(names, key.Name)
+		}
 	}
 	ordered, err := s.loadDueCandidates(ctx, names, limit, now)
 	if err != nil {
@@ -244,14 +250,14 @@ func (s *Store) Claim(ctx context.Context, owner string, names []string, limit i
 
 // claimCandidate converts discovery into ownership. A false result is an expected race: the
 // candidate disappeared, became ineligible, or was claimed by another worker first.
-func (s *Store) claimCandidate(ctx context.Context, id uuid.UUID, owner string, accepted map[string]struct{}, lease time.Duration, now time.Time) (execution.Execution, bool, error) {
+func (s *Store) claimCandidate(ctx context.Context, id uuid.UUID, owner string, accepted map[execution.TaskKey]struct{}, lease time.Duration, now time.Time) (execution.Execution, bool, error) {
 	var result execution.Execution
 	err := s.watch(ctx, []string{s.executionKey(id)}, func(tx *redislib.Tx) error {
 		item, getErr := s.getExecutionTx(ctx, tx, id)
 		if getErr != nil {
 			return getErr
 		}
-		_, nameAccepted := accepted[item.TaskName]
+		_, nameAccepted := accepted[execution.TaskKey{Name: item.TaskName, Version: item.TaskVersion}]
 		claimable := item.Status == execution.StatusPending || item.Status == execution.StatusRetry ||
 			(item.Status == execution.StatusRunning && !item.LeaseUntil.After(now))
 		if !nameAccepted || !claimable || item.AvailableAt.After(now) || item.Attempt >= item.MaxAttempts {

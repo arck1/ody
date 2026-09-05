@@ -146,13 +146,12 @@ func (m Module) Name() string { return m.name }
 // Registry composes modules and executes type-erased task bindings.
 type Registry struct {
 	tasks map[string]descriptor
-	names []string
+	keys  []execution.TaskKey
 }
 
 func NewRegistry(modules ...Module) (*Registry, error) {
 	r := &Registry{tasks: map[string]descriptor{}}
 	owners := map[string]string{}
-	names := map[string]struct{}{}
 	for _, module := range modules {
 		if module.name == "" {
 			return nil, errors.New("invalid zero-value module")
@@ -163,17 +162,19 @@ func NewRegistry(modules ...Module) (*Registry, error) {
 				return nil, fmt.Errorf("task %q is registered by modules %q and %q", key, owner, module.name)
 			}
 			owners[key], r.tasks[key] = module.name, binding.descriptor
-			names[binding.descriptor.name] = struct{}{}
+			r.keys = append(r.keys, execution.TaskKey{Name: binding.descriptor.name, Version: binding.descriptor.version})
 		}
 	}
-	for name := range names {
-		r.names = append(r.names, name)
-	}
-	sort.Strings(r.names)
+	sort.Slice(r.keys, func(i, j int) bool {
+		if r.keys[i].Name == r.keys[j].Name {
+			return r.keys[i].Version < r.keys[j].Version
+		}
+		return r.keys[i].Name < r.keys[j].Name
+	})
 	return r, nil
 }
 
-func (r *Registry) Names() []string { return append([]string(nil), r.names...) }
+func (r *Registry) Keys() []execution.TaskKey { return append([]execution.TaskKey(nil), r.keys...) }
 
 func (r *Registry) Execute(ctx context.Context, item execution.Execution) (json.RawMessage, error) {
 	d, ok := r.tasks[descriptorKey(item.TaskName, item.TaskVersion)]

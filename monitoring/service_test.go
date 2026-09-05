@@ -31,7 +31,7 @@ func (s *ServiceSuite) SetupTest() {
 func (s *ServiceSuite) TestInspectAndRestartCompletedTask() {
 	created, err := s.store.CreateExecution(s.ctx, execution.CreateExecution{TaskName: "report", Input: json.RawMessage(`{"day":1}`), MaxAttempts: 3})
 	s.Require().NoError(err)
-	claimed, err := s.store.Claim(s.ctx, "worker", []string{"report"}, 1, time.Minute)
+	claimed, err := s.store.Claim(s.ctx, "worker", []execution.TaskKey{{Name: "report", Version: 0}}, 1, time.Minute)
 	s.Require().NoError(err)
 	s.Require().Len(claimed, 1)
 	s.Require().NoError(s.store.Succeed(s.ctx, created.ID, claimed[0].LeaseToken, json.RawMessage(`{"url":"done"}`)))
@@ -61,7 +61,7 @@ func (s *ServiceSuite) TestRestartReopensPipeline() {
 	s.Require().NoError(err)
 	created, err := s.store.CreateExecution(s.ctx, execution.CreateExecution{TaskName: "fetch", PipelineRunID: &run.ID, NodeKey: "fetch"})
 	s.Require().NoError(err)
-	claimed, err := s.store.Claim(s.ctx, "worker", []string{"fetch"}, 1, time.Minute)
+	claimed, err := s.store.Claim(s.ctx, "worker", []execution.TaskKey{{Name: "fetch", Version: 0}}, 1, time.Minute)
 	s.Require().NoError(err)
 	s.Require().NoError(s.store.Fail(s.ctx, created.ID, claimed[0].LeaseToken, "network"))
 	s.Require().NoError(s.store.SetPipelineRunStatus(s.ctx, run.ID, execution.RunFailed, "node fetch"))

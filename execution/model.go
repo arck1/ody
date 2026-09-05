@@ -4,10 +4,20 @@ package execution
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// TaskKey is the complete routing identity of a task handler. Workers advertise exact keys so an
+// older deployment cannot claim executions created for a newer task version.
+type TaskKey struct {
+	Name    string `json:"name"`
+	Version int    `json:"version"`
+}
+
+func (k TaskKey) String() string { return fmt.Sprintf("%s@v%d", k.Name, k.Version) }
 
 type Status string
 

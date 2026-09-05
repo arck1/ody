@@ -11,7 +11,7 @@ import (
 // Queue owns delivery, leases, retries, and terminal worker transitions.
 // MemoryStore, postgres.Store, and redis.Store all implement this contract.
 type Queue interface {
-	Claim(context.Context, string, []string, int, time.Duration) ([]Execution, error)
+	Claim(context.Context, string, []TaskKey, int, time.Duration) ([]Execution, error)
 	ReapExpired(context.Context) ([]uuid.UUID, error)
 	Heartbeat(context.Context, uuid.UUID, uuid.UUID, time.Duration) error
 	Succeed(context.Context, uuid.UUID, uuid.UUID, json.RawMessage) error

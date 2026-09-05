@@ -150,25 +150,36 @@ func (s *Store) ListRunExecutions(ctx context.Context, runID uuid.UUID) ([]execu
 	return items, rows.Err()
 }
 
-func (s *Store) Claim(ctx context.Context, owner string, names []string, limit int, lease time.Duration) ([]execution.Execution, error) {
+func (s *Store) Claim(ctx context.Context, owner string, keys []execution.TaskKey, limit int, lease time.Duration) ([]execution.Execution, error) {
 	if limit <= 0 {
 		limit = 1
 	}
-	token := uuid.New()
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	routing := make([]string, 0, len(keys))
+	args := make([]any, 0, len(keys)*2+3)
+	for _, key := range keys {
+		routing = append(routing, fmt.Sprintf("(task_name=$%d AND task_version=$%d)", len(args)+1, len(args)+2))
+		args = append(args, key.Name, key.Version)
+	}
+	limitParam, ownerParam, leaseParam := len(args)+1, len(args)+2, len(args)+3
+	args = append(args, limit, owner, lease.Milliseconds())
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	rows, err := tx.QueryContext(ctx, `WITH candidates AS (
+	query := fmt.Sprintf(`WITH candidates AS (
         SELECT id FROM task_executions
-        WHERE task_name = ANY($1) AND available_at <= now()
+        WHERE (%s) AND available_at <= now()
           AND ((status IN ('pending','retry')) OR (status='running' AND lease_until <= now()))
           AND attempt < max_attempts
-        ORDER BY available_at,created_at FOR UPDATE SKIP LOCKED LIMIT $2)
-      UPDATE task_executions e SET status='running', attempt=e.attempt+1, lease_owner=$3,
-        lease_token=$4, lease_until=now()+($5*interval '1 millisecond'), started_at=COALESCE(started_at,now())
-      FROM candidates c WHERE e.id=c.id RETURNING `+prefixedColumns("e"), names, limit, owner, token, lease.Milliseconds())
+		ORDER BY available_at,created_at FOR UPDATE SKIP LOCKED LIMIT $%d)
+	  UPDATE task_executions e SET status='running', attempt=e.attempt+1, lease_owner=$%d,
+		lease_token=gen_random_uuid(), lease_until=now()+($%d*interval '1 millisecond'), started_at=COALESCE(started_at,now())
+	  FROM candidates c WHERE e.id=c.id RETURNING %s`, strings.Join(routing, " OR "), limitParam, ownerParam, leaseParam, prefixedColumns("e"))
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

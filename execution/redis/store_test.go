@@ -28,7 +28,7 @@ func TestStoreExecutionLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, created.ID, duplicate.ID)
 
-	claimed, err := store.Claim(ctx, "worker", []string{"work"}, 1, time.Minute)
+	claimed, err := store.Claim(ctx, "worker", []execution.TaskKey{{Name: "work", Version: 1}}, 1, time.Minute)
 	require.NoError(t, err)
 	require.Len(t, claimed, 1)
 	require.Equal(t, execution.StatusRunning, claimed[0].Status)
@@ -64,10 +64,10 @@ func TestStoreRetryAndPipelineLifecycle(t *testing.T) {
 		TaskName: "step", TaskVersion: 1, MaxAttempts: 2, PipelineRunID: &run.ID, NodeKey: "first",
 	})
 	require.NoError(t, err)
-	claimed, err := store.Claim(ctx, "worker", []string{"step"}, 1, time.Second)
+	claimed, err := store.Claim(ctx, "worker", []execution.TaskKey{{Name: "step", Version: 1}}, 1, time.Second)
 	require.NoError(t, err)
 	require.NoError(t, store.Retry(ctx, created.ID, claimed[0].LeaseToken, "temporary", time.Now().Add(-time.Second)))
-	claimed, err = store.Claim(ctx, "worker", []string{"step"}, 1, time.Second)
+	claimed, err = store.Claim(ctx, "worker", []execution.TaskKey{{Name: "step", Version: 1}}, 1, time.Second)
 	require.NoError(t, err)
 	require.NoError(t, store.Retry(ctx, created.ID, claimed[0].LeaseToken, "exhausted", time.Now()))
 	failed, err := store.GetExecution(ctx, created.ID)
@@ -96,7 +96,7 @@ func TestStoreReapsExpiredFinalLease(t *testing.T) {
 	ctx := context.Background()
 	created, err := store.CreateExecution(ctx, execution.CreateExecution{TaskName: "work", MaxAttempts: 1})
 	require.NoError(t, err)
-	claimed, err := store.Claim(ctx, "worker", []string{"work"}, 1, -time.Second)
+	claimed, err := store.Claim(ctx, "worker", []execution.TaskKey{{Name: "work", Version: 0}}, 1, -time.Second)
 	require.NoError(t, err)
 	require.Len(t, claimed, 1)
 

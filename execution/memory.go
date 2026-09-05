@@ -130,20 +130,20 @@ func (s *MemoryStore) ListRunExecutions(_ context.Context, runID uuid.UUID) ([]E
 	return items, nil
 }
 
-func (s *MemoryStore) Claim(_ context.Context, owner string, names []string, limit int, lease time.Duration) ([]Execution, error) {
+func (s *MemoryStore) Claim(_ context.Context, owner string, keys []TaskKey, limit int, lease time.Duration) ([]Execution, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if limit <= 0 {
 		limit = 1
 	}
-	accepted := make(map[string]struct{}, len(names))
-	for _, name := range names {
-		accepted[name] = struct{}{}
+	accepted := make(map[TaskKey]struct{}, len(keys))
+	for _, key := range keys {
+		accepted[key] = struct{}{}
 	}
 	now := s.now()
 	candidates := make([]Execution, 0)
 	for _, item := range s.executions {
-		if _, ok := accepted[item.TaskName]; !ok || item.AvailableAt.After(now) {
+		if _, ok := accepted[TaskKey{Name: item.TaskName, Version: item.TaskVersion}]; !ok || item.AvailableAt.After(now) {
 			continue
 		}
 		claimable := item.Status == StatusPending || item.Status == StatusRetry ||

@@ -13,7 +13,7 @@ func TestMemoryStoreRejectsStaleLease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.Claim(context.Background(), "worker-a", []string{"work"}, 1, time.Minute)
+	claimed, err := store.Claim(context.Background(), "worker-a", []TaskKey{{Name: "work", Version: 1}}, 1, time.Minute)
 	if err != nil || len(claimed) != 1 {
 		t.Fatalf("claim: %+v %v", claimed, err)
 	}
@@ -29,7 +29,7 @@ func TestMemoryStoreReapsCrashedFinalAttempt(t *testing.T) {
 	store := NewMemoryStore()
 	store.now = func() time.Time { return time.Unix(100, 0).UTC() }
 	created, _ := store.CreateExecution(context.Background(), CreateExecution{TaskName: "work", TaskVersion: 1, MaxAttempts: 1})
-	_, _ = store.Claim(context.Background(), "worker", []string{"work"}, 1, time.Second)
+	_, _ = store.Claim(context.Background(), "worker", []TaskKey{{Name: "work", Version: 1}}, 1, time.Second)
 	store.now = func() time.Time { return time.Unix(102, 0).UTC() }
 	if _, err := store.ReapExpired(context.Background()); err != nil {
 		t.Fatal(err)
@@ -51,5 +51,33 @@ func TestMemoryStoreIdempotency(t *testing.T) {
 	second, _ := store.CreateExecution(context.Background(), request)
 	if first.ID != second.ID {
 		t.Fatalf("idempotency returned %s and %s", first.ID, second.ID)
+	}
+}
+
+func TestMemoryStoreClaimsOnlyAdvertisedTaskVersions(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+	oldVersion, err := store.CreateExecution(ctx, CreateExecution{TaskName: "work", TaskVersion: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newVersion, err := store.CreateExecution(ctx, CreateExecution{TaskName: "work", TaskVersion: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	claimed, err := store.Claim(ctx, "old-worker", []TaskKey{{Name: "work", Version: 1}}, 2, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claimed) != 1 || claimed[0].ID != oldVersion.ID {
+		t.Fatalf("claimed = %+v, want only %s", claimed, oldVersion.ID)
+	}
+	remaining, err := store.GetExecution(ctx, newVersion.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remaining.Status != StatusPending {
+		t.Fatalf("new version status = %s, want pending", remaining.Status)
 	}
 }

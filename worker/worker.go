@@ -102,7 +102,7 @@ func (w *Worker) loop(ctx context.Context) {
 				_ = w.advancer.Advance(ctx, runID)
 			}
 		}
-		items, err := w.store.Claim(ctx, w.options.ID, w.registry.Names(), 1, w.options.LeaseDuration)
+		items, err := w.store.Claim(ctx, w.options.ID, w.registry.Keys(), 1, w.options.LeaseDuration)
 		if err != nil || len(items) == 0 {
 			if reconcile, ok := w.advancer.(reconciler); ok {
 				_ = reconcile.Reconcile(ctx)

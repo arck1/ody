@@ -108,7 +108,7 @@ func TestReconcileSchedulesSuccessorAfterCompletionGap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, _ := store.Claim(context.Background(), "worker", []string{"gap.first"}, 1, time.Minute)
+	claimed, _ := store.Claim(context.Background(), "worker", []execution.TaskKey{{Name: "gap.first", Version: 1}}, 1, time.Minute)
 	if err = store.Succeed(context.Background(), claimed[0].ID, claimed[0].LeaseToken, []byte(`10`)); err != nil {
 		t.Fatal(err)
 	}

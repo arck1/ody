@@ -22,7 +22,7 @@ func TestTypedTaskPersistsInputAndOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, _ := store.Claim(context.Background(), "worker", registry.Names(), 1, time.Minute)
+	claimed, _ := store.Claim(context.Background(), "worker", registry.Keys(), 1, time.Minute)
 	output, err := registry.Execute(context.Background(), claimed[0])
 	if err != nil {
 		t.Fatal(err)

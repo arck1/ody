@@ -60,7 +60,7 @@ export SCHEDULOR_DB_DSN='postgres://schedulor:schedulor@localhost:5432/schedulor
 go run ./cmd/schedulor-admin tasks -status running -limit 100
 go run ./cmd/schedulor-admin tasks -name email.send -status failed
 go run ./cmd/schedulor-admin task '<execution-uuid>'
-go run ./cmd/schedulor-admin pipelines running,failed
+go run ./cmd/schedulor-admin pipelines -status running,failed -limit 100
 go run ./cmd/schedulor-admin pipeline '<pipeline-uuid>'
 go run ./cmd/schedulor-admin restart '<execution-uuid>'
 go run ./cmd/schedulor-admin cancel '<execution-uuid>' 'requested by customer'
@@ -78,6 +78,11 @@ go run ./cmd/schedulor-admin serve
 ```
 
 Вывод CLI — JSON, поэтому его можно передавать в `jq`.
+
+HTTP-списки ограничены 100 элементами по умолчанию. Для следующей страницы передайте
+`before_time=<created_at>&before_id=<id>` последнего элемента предыдущей страницы. Максимальный
+`limit` для web API — 1000. Go API использует `execution.Cursor` в `ListFilter.Before` и
+`RunFilter.Before`.
 
 ## Web UI и JSON API
 

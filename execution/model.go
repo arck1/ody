@@ -89,6 +89,20 @@ type ListFilter struct {
 	Status        Status
 	PipelineRunID *uuid.UUID
 	Limit         int
+	Before        *Cursor
+}
+
+// Cursor identifies the last item of a descending page. Pass it as Before to continue without
+// offset scans; ID makes equal timestamps deterministic.
+type Cursor struct {
+	CreatedAt time.Time
+	ID        uuid.UUID
+}
+
+type RunFilter struct {
+	Statuses []RunStatus
+	Limit    int
+	Before   *Cursor
 }
 
 // PipelineRun tracks one durable pipeline invocation.

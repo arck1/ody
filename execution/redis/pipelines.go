@@ -43,8 +43,8 @@ func (s *Store) GetPipelineRun(ctx context.Context, id uuid.UUID) (execution.Pip
 }
 
 // ListPipelineRuns returns newest runs first and optionally unions status indexes.
-func (s *Store) ListPipelineRuns(ctx context.Context, statuses []execution.RunStatus) ([]execution.PipelineRun, error) {
-	ids, err := s.pipelineIDs(ctx, statuses)
+func (s *Store) ListPipelineRuns(ctx context.Context, filter execution.RunFilter) ([]execution.PipelineRun, error) {
+	ids, err := s.pipelineIDs(ctx, filter.Statuses)
 	if err != nil {
 		return nil, err
 	}
@@ -58,9 +58,19 @@ func (s *Store) ListPipelineRuns(ctx context.Context, statuses []execution.RunSt
 		if getErr != nil {
 			return nil, getErr
 		}
-		items = append(items, run)
+		if filter.Before == nil || before(run.CreatedAt, run.ID, *filter.Before) {
+			items = append(items, run)
+		}
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].ID.String() > items[j].ID.String()
+		}
+		return items[i].CreatedAt.After(items[j].CreatedAt)
+	})
+	if filter.Limit > 0 && len(items) > filter.Limit {
+		items = items[:filter.Limit]
+	}
 	return items, nil
 }
 

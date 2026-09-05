@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -55,19 +56,19 @@ func (h *Handler) index(response http.ResponseWriter, request *http.Request) {
 }
 
 func (h *Handler) tasks(response http.ResponseWriter, request *http.Request) {
-	limit := 100
-	if raw := request.URL.Query().Get("limit"); raw != "" {
-		value, err := strconv.Atoi(raw)
-		if err != nil || value < 1 || value > 1000 {
-			writeError(response, http.StatusBadRequest, "limit must be between 1 and 1000")
-			return
-		}
-		limit = value
+	limit, ok := parseLimit(response, request)
+	if !ok {
+		return
+	}
+	cursor, ok := parseCursor(response, request)
+	if !ok {
+		return
 	}
 	items, err := h.api.ListTasks(request.Context(), execution.ListFilter{
 		TaskName: request.URL.Query().Get("task_name"),
 		Status:   execution.Status(request.URL.Query().Get("status")),
 		Limit:    limit,
+		Before:   cursor,
 	})
 	writeResult(response, items, err)
 }
@@ -104,14 +105,49 @@ func (h *Handler) cancel(response http.ResponseWriter, request *http.Request) {
 }
 
 func (h *Handler) pipelines(response http.ResponseWriter, request *http.Request) {
+	limit, ok := parseLimit(response, request)
+	if !ok {
+		return
+	}
+	cursor, ok := parseCursor(response, request)
+	if !ok {
+		return
+	}
 	var statuses []execution.RunStatus
 	for _, value := range request.URL.Query()["status"] {
 		if value != "" {
 			statuses = append(statuses, execution.RunStatus(value))
 		}
 	}
-	items, err := h.api.ListPipelines(request.Context(), statuses)
+	items, err := h.api.ListPipelines(request.Context(), execution.RunFilter{Statuses: statuses, Limit: limit, Before: cursor})
 	writeResult(response, items, err)
+}
+
+func parseLimit(response http.ResponseWriter, request *http.Request) (int, bool) {
+	limit := 100
+	if raw := request.URL.Query().Get("limit"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 1000 {
+			writeError(response, http.StatusBadRequest, "limit must be between 1 and 1000")
+			return 0, false
+		}
+		limit = value
+	}
+	return limit, true
+}
+
+func parseCursor(response http.ResponseWriter, request *http.Request) (*execution.Cursor, bool) {
+	rawTime, rawID := request.URL.Query().Get("before_time"), request.URL.Query().Get("before_id")
+	if rawTime == "" && rawID == "" {
+		return nil, true
+	}
+	createdAt, timeErr := time.Parse(time.RFC3339Nano, rawTime)
+	id, idErr := uuid.Parse(rawID)
+	if timeErr != nil || idErr != nil {
+		writeError(response, http.StatusBadRequest, "before_time and before_id must form a valid cursor")
+		return nil, false
+	}
+	return &execution.Cursor{CreatedAt: createdAt, ID: id}, true
 }
 
 func (h *Handler) pipeline(response http.ResponseWriter, request *http.Request) {

@@ -112,7 +112,11 @@ func (s *Store) ListExecutions(ctx context.Context, filter execution.ListFilter)
 		args = append(args, filter.PipelineRunID)
 		conditions = append(conditions, fmt.Sprintf("pipeline_run_id=$%d", len(args)))
 	}
-	query := `SELECT ` + executionColumns + ` FROM task_executions WHERE ` + strings.Join(conditions, " AND ") + ` ORDER BY created_at DESC,id`
+	if filter.Before != nil {
+		args = append(args, filter.Before.CreatedAt, filter.Before.ID)
+		conditions = append(conditions, fmt.Sprintf("(created_at,id)<($%d,$%d)", len(args)-1, len(args)))
+	}
+	query := `SELECT ` + executionColumns + ` FROM task_executions WHERE ` + strings.Join(conditions, " AND ") + ` ORDER BY created_at DESC,id DESC`
 	if filter.Limit > 0 {
 		args = append(args, filter.Limit)
 		query += fmt.Sprintf(" LIMIT $%d", len(args))
@@ -541,18 +545,30 @@ func (s *Store) GetPipelineRun(ctx context.Context, id uuid.UUID) (execution.Pip
 	}
 	return run, translateNotFound(err)
 }
-func (s *Store) ListPipelineRuns(ctx context.Context, statuses []execution.RunStatus) ([]execution.PipelineRun, error) {
+func (s *Store) ListPipelineRuns(ctx context.Context, filter execution.RunFilter) ([]execution.PipelineRun, error) {
 	query := `SELECT id,pipeline_name,pipeline_version,input,status,error,created_at,updated_at,finished_at FROM pipeline_runs`
 	args := []any{}
-	if len(statuses) > 0 {
-		values := make([]string, len(statuses))
-		for i, status := range statuses {
+	conditions := []string{}
+	if len(filter.Statuses) > 0 {
+		values := make([]string, len(filter.Statuses))
+		for i, status := range filter.Statuses {
 			values[i] = string(status)
 		}
-		query += ` WHERE status = ANY($1)`
 		args = append(args, values)
+		conditions = append(conditions, fmt.Sprintf("status = ANY($%d)", len(args)))
 	}
-	query += ` ORDER BY created_at DESC,id`
+	if filter.Before != nil {
+		args = append(args, filter.Before.CreatedAt, filter.Before.ID)
+		conditions = append(conditions, fmt.Sprintf("(created_at,id)<($%d,$%d)", len(args)-1, len(args)))
+	}
+	if len(conditions) > 0 {
+		query += ` WHERE ` + strings.Join(conditions, " AND ")
+	}
+	query += ` ORDER BY created_at DESC,id DESC`
+	if filter.Limit > 0 {
+		args = append(args, filter.Limit)
+		query += fmt.Sprintf(" LIMIT $%d", len(args))
+	}
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err

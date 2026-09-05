@@ -183,7 +183,14 @@ func matchesExecutionFilter(item execution.Execution, filter execution.ListFilte
 	if filter.Status != "" && item.Status != filter.Status {
 		return false
 	}
+	if filter.Before != nil && !before(item.CreatedAt, item.ID, *filter.Before) {
+		return false
+	}
 	return filter.PipelineRunID == nil || item.PipelineRunID != nil && *item.PipelineRunID == *filter.PipelineRunID
+}
+
+func before(createdAt time.Time, id uuid.UUID, cursor execution.Cursor) bool {
+	return createdAt.Before(cursor.CreatedAt) || createdAt.Equal(cursor.CreatedAt) && id.String() < cursor.ID.String()
 }
 
 // ListRunExecutions returns pipeline nodes in creation order.

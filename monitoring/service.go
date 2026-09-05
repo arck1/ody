@@ -19,7 +19,7 @@ type TaskReader interface {
 
 // PipelineReader provides pipeline inspection including all node executions.
 type PipelineReader interface {
-	ListPipelines(context.Context, []execution.RunStatus) ([]execution.PipelineRun, error)
+	ListPipelines(context.Context, execution.RunFilter) ([]execution.PipelineRun, error)
 	Pipeline(context.Context, uuid.UUID) (PipelineDetails, error)
 }
 
@@ -91,8 +91,8 @@ func (s *Service) Task(ctx context.Context, id uuid.UUID) (TaskDetails, error) {
 	return TaskDetails{Execution: item, Events: events}, nil
 }
 
-func (s *Service) ListPipelines(ctx context.Context, statuses []execution.RunStatus) ([]execution.PipelineRun, error) {
-	return s.store.ListPipelineRuns(ctx, statuses)
+func (s *Service) ListPipelines(ctx context.Context, filter execution.RunFilter) ([]execution.PipelineRun, error) {
+	return s.store.ListPipelineRuns(ctx, filter)
 }
 
 func (s *Service) Pipeline(ctx context.Context, id uuid.UUID) (PipelineDetails, error) {

@@ -81,3 +81,26 @@ func TestMemoryStoreClaimsOnlyAdvertisedTaskVersions(t *testing.T) {
 		t.Fatalf("new version status = %s, want pending", remaining.Status)
 	}
 }
+
+func TestMemoryStoreUsesStableCursorPagination(t *testing.T) {
+	store := NewMemoryStore()
+	store.now = func() time.Time { return time.Unix(100, 0).UTC() }
+	ctx := context.Background()
+	for range 3 {
+		if _, err := store.CreateExecution(ctx, CreateExecution{TaskName: "page"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := store.ListExecutions(ctx, ListFilter{TaskName: "page", Limit: 2})
+	if err != nil || len(first) != 2 {
+		t.Fatalf("first page = %+v, %v", first, err)
+	}
+	cursor := Cursor{CreatedAt: first[1].CreatedAt, ID: first[1].ID}
+	second, err := store.ListExecutions(ctx, ListFilter{TaskName: "page", Limit: 2, Before: &cursor})
+	if err != nil || len(second) != 1 {
+		t.Fatalf("second page = %+v, %v", second, err)
+	}
+	if second[0].ID == first[0].ID || second[0].ID == first[1].ID {
+		t.Fatalf("pages overlap: %+v / %+v", first, second)
+	}
+}

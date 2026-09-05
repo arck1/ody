@@ -108,9 +108,12 @@ func (s *MemoryStore) ListExecutions(_ context.Context, filter ListFilter) ([]Ex
 		if filter.PipelineRunID != nil && (item.PipelineRunID == nil || *item.PipelineRunID != *filter.PipelineRunID) {
 			continue
 		}
+		if filter.Before != nil && !beforeCursor(item.CreatedAt, item.ID, *filter.Before) {
+			continue
+		}
 		items = append(items, cloneExecution(item))
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	sort.Slice(items, func(i, j int) bool { return newer(items[i].CreatedAt, items[i].ID, items[j].CreatedAt, items[j].ID) })
 	if filter.Limit > 0 && len(items) > filter.Limit {
 		items = items[:filter.Limit]
 	}
@@ -399,6 +402,17 @@ func hasKey(values map[string]struct{}, key string) bool {
 	return ok
 }
 
+func newer(leftTime time.Time, leftID uuid.UUID, rightTime time.Time, rightID uuid.UUID) bool {
+	if leftTime.Equal(rightTime) {
+		return leftID.String() > rightID.String()
+	}
+	return leftTime.After(rightTime)
+}
+
+func beforeCursor(createdAt time.Time, id uuid.UUID, cursor Cursor) bool {
+	return createdAt.Before(cursor.CreatedAt) || createdAt.Equal(cursor.CreatedAt) && id.String() < cursor.ID.String()
+}
+
 func (s *MemoryStore) Events(_ context.Context, id uuid.UUID) ([]Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -435,11 +449,11 @@ func (s *MemoryStore) GetPipelineRun(_ context.Context, id uuid.UUID) (PipelineR
 	return cloneRun(run), nil
 }
 
-func (s *MemoryStore) ListPipelineRuns(_ context.Context, statuses []RunStatus) ([]PipelineRun, error) {
+func (s *MemoryStore) ListPipelineRuns(_ context.Context, filter RunFilter) ([]PipelineRun, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	accepted := map[RunStatus]struct{}{}
-	for _, status := range statuses {
+	for _, status := range filter.Statuses {
 		accepted[status] = struct{}{}
 	}
 	items := make([]PipelineRun, 0)
@@ -449,9 +463,15 @@ func (s *MemoryStore) ListPipelineRuns(_ context.Context, statuses []RunStatus) 
 				continue
 			}
 		}
+		if filter.Before != nil && !beforeCursor(run.CreatedAt, run.ID, *filter.Before) {
+			continue
+		}
 		items = append(items, cloneRun(run))
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	sort.Slice(items, func(i, j int) bool { return newer(items[i].CreatedAt, items[i].ID, items[j].CreatedAt, items[j].ID) })
+	if filter.Limit > 0 && len(items) > filter.Limit {
+		items = items[:filter.Limit]
+	}
 	return items, nil
 }
 

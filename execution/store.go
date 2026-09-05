@@ -34,7 +34,7 @@ type ExecutionRepository interface {
 type PipelineRepository interface {
 	CreatePipelineRun(context.Context, CreatePipelineRun) (PipelineRun, error)
 	GetPipelineRun(context.Context, uuid.UUID) (PipelineRun, error)
-	ListPipelineRuns(context.Context, []RunStatus) ([]PipelineRun, error)
+	ListPipelineRuns(context.Context, RunFilter) ([]PipelineRun, error)
 	SetPipelineRunStatus(context.Context, uuid.UUID, RunStatus, string) error
 	RestartPipelineSubgraph(context.Context, RestartSubgraph) (Execution, error)
 	ReleaseExecution(context.Context, uuid.UUID, json.RawMessage, time.Time) error

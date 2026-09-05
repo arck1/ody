@@ -211,7 +211,7 @@ func safeBuildInput(node *nodeDefinition, initial json.RawMessage, outputs map[s
 
 // Reconcile resumes pipeline runs left between durable task completion and DAG advancement.
 func (e *Engine) Reconcile(ctx context.Context) error {
-	runs, err := e.store.ListPipelineRuns(ctx, []execution.RunStatus{execution.RunPending, execution.RunRunning})
+	runs, err := e.store.ListPipelineRuns(ctx, execution.RunFilter{Statuses: []execution.RunStatus{execution.RunPending, execution.RunRunning}})
 	if err != nil {
 		return err
 	}

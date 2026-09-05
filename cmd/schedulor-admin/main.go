@@ -124,13 +124,19 @@ func command(ctx context.Context, service *monitoring.Service, store execution.S
 		item, err := service.Task(ctx, id)
 		return printJSON(item, err)
 	case "pipelines":
+		flags := flag.NewFlagSet(name, flag.ContinueOnError)
+		statusList := flags.String("status", "", "comma-separated pipeline statuses")
+		limit := flags.Int("limit", 100, "result limit")
+		if err := flags.Parse(args); err != nil {
+			return err
+		}
 		var statuses []execution.RunStatus
-		if len(args) > 0 && args[0] != "" {
-			for _, status := range strings.Split(args[0], ",") {
+		if *statusList != "" {
+			for _, status := range strings.Split(*statusList, ",") {
 				statuses = append(statuses, execution.RunStatus(status))
 			}
 		}
-		items, err := service.ListPipelines(ctx, statuses)
+		items, err := service.ListPipelines(ctx, execution.RunFilter{Statuses: statuses, Limit: *limit})
 		return printJSON(items, err)
 	case "pipeline":
 		id, err := argumentID(args)

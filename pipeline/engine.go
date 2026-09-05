@@ -152,12 +152,13 @@ func (e *Engine) Reconcile(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	var failures []error
 	for _, run := range runs {
-		if err = e.Advance(ctx, run.ID); err != nil {
-			return err
+		if advanceErr := e.Advance(ctx, run.ID); advanceErr != nil {
+			failures = append(failures, fmt.Errorf("advance pipeline run %s: %w", run.ID, advanceErr))
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 // Inspect returns the complete persisted state of a pipeline run.

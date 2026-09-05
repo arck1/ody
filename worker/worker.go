@@ -33,16 +33,45 @@ type Options struct {
 	LeaseDuration time.Duration
 	// HeartbeatInterval controls lease renewal and must be shorter than LeaseDuration.
 	HeartbeatInterval time.Duration
+	// MaxConsecutiveErrors stops a polling loop after this many infrastructure failures. Zero keeps
+	// retrying forever while reporting degraded health.
+	MaxConsecutiveErrors int
 }
+
+type Operation string
+
+const (
+	OperationClaim     Operation = "claim"
+	OperationReap      Operation = "reap"
+	OperationAdvance   Operation = "advance"
+	OperationReconcile Operation = "reconcile"
+	OperationReload    Operation = "reload"
+)
 
 // Observer receives completed worker decisions. Implementations must avoid blocking the worker.
 type Observer interface {
 	// Transition reports the intended status and the handler or persistence error that caused it.
 	Transition(context.Context, execution.Execution, execution.Status, error)
+	InfrastructureError(context.Context, Operation, error)
 }
 type nopObserver struct{}
 
 func (nopObserver) Transition(context.Context, execution.Execution, execution.Status, error) {}
+func (nopObserver) InfrastructureError(context.Context, Operation, error)                    {}
+
+type HealthStatus string
+
+const (
+	HealthReady    HealthStatus = "ready"
+	HealthDegraded HealthStatus = "degraded"
+)
+
+type Health struct {
+	Status              HealthStatus
+	ConsecutiveFailures int
+	LastError           string
+	LastFailureAt       time.Time
+}
 
 type Worker struct {
 	store    execution.Store
@@ -50,6 +79,8 @@ type Worker struct {
 	advancer Advancer
 	observer Observer
 	options  Options
+	healthMu sync.RWMutex
+	health   Health
 }
 
 func New(store execution.Store, registry *task.Registry, advancer Advancer, observer Observer, options Options) (*Worker, error) {
@@ -80,40 +111,116 @@ func New(store execution.Store, registry *task.Registry, advancer Advancer, obse
 	if observer == nil {
 		observer = nopObserver{}
 	}
-	return &Worker{store: store, registry: registry, advancer: advancer, observer: observer, options: options}, nil
+	return &Worker{
+		store: store, registry: registry, advancer: advancer, observer: observer, options: options,
+		health: Health{Status: HealthReady},
+	}, nil
 }
 
 // Run blocks until ctx is cancelled and drains all worker goroutines.
 func (w *Worker) Run(ctx context.Context) error {
+	runCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 	var group sync.WaitGroup
 	for index := 0; index < w.options.Concurrency; index++ {
-		group.Go(func() { w.loop(ctx) })
+		group.Go(func() {
+			if err := w.loop(runCtx); err != nil {
+				cancel(err)
+			}
+		})
 	}
 	group.Wait()
-	return ctx.Err()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return context.Cause(runCtx)
 }
 
-func (w *Worker) loop(ctx context.Context) {
+func (w *Worker) loop(ctx context.Context) error {
+	consecutiveErrors := 0
 	for ctx.Err() == nil {
+		hadInfrastructureError := false
 		// Reaping before claiming prevents exhausted crashed deliveries from blocking the queue head.
-		runs, _ := w.store.ReapExpired(ctx)
-		for _, runID := range runs {
-			if w.advancer != nil {
-				_ = w.advancer.Advance(ctx, runID)
-			}
-		}
-		items, err := w.store.Claim(ctx, w.options.ID, w.registry.Keys(), 1, w.options.LeaseDuration)
-		if err != nil || len(items) == 0 {
-			if reconcile, ok := w.advancer.(reconciler); ok {
-				_ = reconcile.Reconcile(ctx)
+		runs, err := w.store.ReapExpired(ctx)
+		if err != nil {
+			hadInfrastructureError = true
+			if w.infrastructureFailure(ctx, OperationReap, err, &consecutiveErrors) {
+				return fmt.Errorf("reap expired executions: %w", err)
 			}
 			if !wait(ctx, w.options.PollInterval) {
-				return
+				break
 			}
 			continue
 		}
+		for _, runID := range runs {
+			if w.advancer != nil {
+				if err = w.advancer.Advance(ctx, runID); err != nil {
+					hadInfrastructureError = true
+					if w.infrastructureFailure(ctx, OperationAdvance, err, &consecutiveErrors) {
+						return fmt.Errorf("advance reaped pipeline: %w", err)
+					}
+				}
+			}
+		}
+		items, err := w.store.Claim(ctx, w.options.ID, w.registry.Keys(), 1, w.options.LeaseDuration)
+		if err != nil {
+			hadInfrastructureError = true
+			if w.infrastructureFailure(ctx, OperationClaim, err, &consecutiveErrors) {
+				return fmt.Errorf("claim execution: %w", err)
+			}
+		}
+		if err != nil || len(items) == 0 {
+			if reconcile, ok := w.advancer.(reconciler); ok {
+				if reconcileErr := reconcile.Reconcile(ctx); reconcileErr != nil {
+					hadInfrastructureError = true
+					if w.infrastructureFailure(ctx, OperationReconcile, reconcileErr, &consecutiveErrors) {
+						return fmt.Errorf("reconcile pipelines: %w", reconcileErr)
+					}
+				}
+			}
+			if !hadInfrastructureError {
+				w.healthy(&consecutiveErrors)
+			}
+			if !wait(ctx, w.options.PollInterval) {
+				break
+			}
+			continue
+		}
+		if !hadInfrastructureError {
+			w.healthy(&consecutiveErrors)
+		}
 		w.execute(ctx, items[0])
 	}
+	return nil
+}
+
+func (w *Worker) infrastructureFailure(ctx context.Context, operation Operation, err error, consecutive *int) bool {
+	if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+		return false
+	}
+	(*consecutive)++
+	w.healthMu.Lock()
+	w.health = Health{
+		Status: HealthDegraded, ConsecutiveFailures: *consecutive,
+		LastError: err.Error(), LastFailureAt: time.Now().UTC(),
+	}
+	w.healthMu.Unlock()
+	w.observer.InfrastructureError(ctx, operation, err)
+	return w.options.MaxConsecutiveErrors > 0 && *consecutive >= w.options.MaxConsecutiveErrors
+}
+
+func (w *Worker) healthy(consecutive *int) {
+	*consecutive = 0
+	w.healthMu.Lock()
+	w.health = Health{Status: HealthReady}
+	w.healthMu.Unlock()
+}
+
+// Health returns the latest state of worker infrastructure operations.
+func (w *Worker) Health() Health {
+	w.healthMu.RLock()
+	defer w.healthMu.RUnlock()
+	return w.health
 }
 
 type result struct {
@@ -187,7 +294,12 @@ func (w *Worker) resolve(ctx context.Context, item execution.Execution, output j
 		w.observer.Transition(ctx, item, execution.StatusRunning, err)
 		return
 	}
-	updated, _ := w.store.GetExecution(ctx, item.ID)
+	updated, err := w.store.GetExecution(ctx, item.ID)
+	if err != nil {
+		w.observer.InfrastructureError(ctx, OperationReload, err)
+		w.observer.Transition(ctx, item, execution.StatusRetry, handlerErr)
+		return
+	}
 	w.observer.Transition(ctx, updated, updated.Status, handlerErr)
 	if updated.Status == execution.StatusFailed {
 		w.advance(ctx, updated)
@@ -196,7 +308,9 @@ func (w *Worker) resolve(ctx context.Context, item execution.Execution, output j
 
 func (w *Worker) advance(ctx context.Context, item execution.Execution) {
 	if w.advancer != nil && item.PipelineRunID != nil {
-		_ = w.advancer.Advance(ctx, *item.PipelineRunID)
+		if err := w.advancer.Advance(ctx, *item.PipelineRunID); err != nil {
+			w.observer.InfrastructureError(ctx, OperationAdvance, err)
+		}
 	}
 }
 

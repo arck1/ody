@@ -9,12 +9,14 @@ import (
 	prom "github.com/prometheus/client_golang/prometheus"
 
 	"schedulor/execution"
+	"schedulor/worker"
 )
 
 type Metrics struct {
-	transitions *prom.CounterVec
-	duration    *prom.HistogramVec
-	errors      *prom.CounterVec
+	transitions          *prom.CounterVec
+	duration             *prom.HistogramVec
+	errors               *prom.CounterVec
+	infrastructureErrors *prom.CounterVec
 }
 
 // New registers transition metrics and a collector for current persisted state.
@@ -39,13 +41,22 @@ func New(registerer prom.Registerer, store execution.Store) (*Metrics, error) {
 			Namespace: "schedulor", Subsystem: "worker", Name: "observer_errors_total",
 			Help: "Number of worker transition errors reported to the observer.",
 		}, []string{"task"}),
+		infrastructureErrors: prom.NewCounterVec(prom.CounterOpts{
+			Namespace: "schedulor", Subsystem: "worker", Name: "infrastructure_errors_total",
+			Help: "Number of worker infrastructure errors by operation.",
+		}, []string{"operation"}),
 	}
-	for _, collector := range []prom.Collector{metrics.transitions, metrics.duration, metrics.errors, newStoreCollector(store)} {
+	for _, collector := range []prom.Collector{metrics.transitions, metrics.duration, metrics.errors, metrics.infrastructureErrors, newStoreCollector(store)} {
 		if err := registerer.Register(collector); err != nil {
 			return nil, err
 		}
 	}
 	return metrics, nil
+}
+
+// InfrastructureError implements worker.Observer.
+func (m *Metrics) InfrastructureError(_ context.Context, operation worker.Operation, _ error) {
+	m.infrastructureErrors.WithLabelValues(string(operation)).Inc()
 }
 
 // Transition implements worker.Observer.

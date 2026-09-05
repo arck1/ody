@@ -99,10 +99,57 @@ func TestPermanentFailureIsStoredWithoutRetry(t *testing.T) {
 	t.Fatal("permanent failure was not stored")
 }
 
+func TestRunStopsAfterInfrastructureFailureLimit(t *testing.T) {
+	definition := task.New[struct{}, struct{}]("failing.store")
+	module, _ := task.NewModule("failing", task.Handle(definition, func(context.Context, task.Message[struct{}]) (struct{}, error) {
+		return struct{}{}, nil
+	}))
+	registry, _ := task.NewRegistry(module)
+	store := &reapFailureStore{MemoryStore: execution.NewMemoryStore()}
+	observer := &recordingObserver{}
+	runner, err := New(store, registry, nil, observer, Options{
+		PollInterval: time.Millisecond, MaxConsecutiveErrors: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = runner.Run(context.Background())
+	if err == nil || !errors.Is(err, errInfrastructure) {
+		t.Fatalf("Run error = %v, want infrastructure error", err)
+	}
+	health := runner.Health()
+	if health.Status != HealthDegraded || health.ConsecutiveFailures != 2 {
+		t.Fatalf("health = %+v", health)
+	}
+	if len(observer.operations) != 2 || observer.operations[0] != OperationReap {
+		t.Fatalf("operations = %v", observer.operations)
+	}
+}
+
 type lostLeaseStore struct{ *execution.MemoryStore }
 
 func (s *lostLeaseStore) Heartbeat(context.Context, uuid.UUID, uuid.UUID, time.Duration) error {
 	return execution.ErrLeaseLost
+}
+
+var errInfrastructure = errors.New("infrastructure unavailable")
+
+type reapFailureStore struct{ *execution.MemoryStore }
+
+func (s *reapFailureStore) ReapExpired(context.Context) ([]uuid.UUID, error) {
+	return nil, errInfrastructure
+}
+
+type recordingObserver struct {
+	operations []Operation
+}
+
+func (o *recordingObserver) Transition(context.Context, execution.Execution, execution.Status, error) {
+}
+
+func (o *recordingObserver) InfrastructureError(_ context.Context, operation Operation, _ error) {
+	o.operations = append(o.operations, operation)
 }
 
 type assertError string

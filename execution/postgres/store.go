@@ -532,6 +532,63 @@ func (s *Store) PipelineCounts(ctx context.Context) ([]execution.PipelineCount, 
 	return result, rows.Err()
 }
 
+func (s *Store) Purge(ctx context.Context, before time.Time, limit int) (execution.PurgeResult, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return execution.PurgeResult{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	runRows, err := tx.QueryContext(ctx, `SELECT id FROM pipeline_runs
+		WHERE finished_at IS NOT NULL AND finished_at<$1 ORDER BY finished_at,id LIMIT $2 FOR UPDATE SKIP LOCKED`, before, limit)
+	if err != nil {
+		return execution.PurgeResult{}, err
+	}
+	runIDs := []uuid.UUID{}
+	for runRows.Next() {
+		var id uuid.UUID
+		if err = runRows.Scan(&id); err != nil {
+			_ = runRows.Close()
+			return execution.PurgeResult{}, err
+		}
+		runIDs = append(runIDs, id)
+	}
+	if err = runRows.Close(); err != nil {
+		return execution.PurgeResult{}, err
+	}
+	result := execution.PurgeResult{PipelineRuns: int64(len(runIDs))}
+	if len(runIDs) > 0 {
+		deleted, deleteErr := tx.ExecContext(ctx, `DELETE FROM task_executions WHERE pipeline_run_id=ANY($1)`, runIDs)
+		if deleteErr != nil {
+			return execution.PurgeResult{}, deleteErr
+		}
+		result.Executions, err = deleted.RowsAffected()
+		if err != nil {
+			return execution.PurgeResult{}, err
+		}
+		if _, err = tx.ExecContext(ctx, `DELETE FROM pipeline_runs WHERE id=ANY($1)`, runIDs); err != nil {
+			return execution.PurgeResult{}, err
+		}
+	}
+	remaining := limit - len(runIDs)
+	if remaining > 0 {
+		deleted, deleteErr := tx.ExecContext(ctx, `DELETE FROM task_executions WHERE id IN (
+			SELECT id FROM task_executions WHERE pipeline_run_id IS NULL AND finished_at IS NOT NULL
+			AND finished_at<$1 ORDER BY finished_at,id LIMIT $2 FOR UPDATE SKIP LOCKED)`, before, remaining)
+		if deleteErr != nil {
+			return execution.PurgeResult{}, deleteErr
+		}
+		count, countErr := deleted.RowsAffected()
+		if countErr != nil {
+			return execution.PurgeResult{}, countErr
+		}
+		result.Executions += count
+	}
+	return result, tx.Commit()
+}
+
 func (s *Store) CreatePipelineRun(ctx context.Context, r execution.CreatePipelineRun) (execution.PipelineRun, error) {
 	now := time.Now().UTC()
 	run := execution.PipelineRun{ID: uuid.New(), PipelineName: r.PipelineName, PipelineVersion: r.PipelineVersion, Input: r.Input, Status: execution.RunPending, IdempotencyKey: r.IdempotencyKey, CreatedAt: now, UpdatedAt: now}

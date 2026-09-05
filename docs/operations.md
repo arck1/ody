@@ -64,6 +64,7 @@ go run ./cmd/schedulor-admin pipelines -status running,failed -limit 100
 go run ./cmd/schedulor-admin pipeline '<pipeline-uuid>'
 go run ./cmd/schedulor-admin restart '<execution-uuid>'
 go run ./cmd/schedulor-admin cancel '<execution-uuid>' 'requested by customer'
+go run ./cmd/schedulor-admin purge -older-than 720h -limit 1000
 ```
 
 CLI и web UI могут работать с Redis без изменения команд:
@@ -78,6 +79,10 @@ go run ./cmd/schedulor-admin serve
 ```
 
 Вывод CLI — JSON, поэтому его можно передавать в `jq`.
+
+`purge` удаляет только terminal standalone executions и terminal pipeline runs вместе с их узлами,
+событиями и idempotency references. Запускайте его периодически небольшими batch; активные задачи,
+blocked descendants и незавершённые pipelines не удаляются.
 
 HTTP-списки ограничены 100 элементами по умолчанию. Для следующей страницы передайте
 `before_time=<created_at>&before_id=<id>` последнего элемента предыдущей страницы. Максимальный

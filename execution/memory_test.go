@@ -104,3 +104,39 @@ func TestMemoryStoreUsesStableCursorPagination(t *testing.T) {
 		t.Fatalf("pages overlap: %+v / %+v", first, second)
 	}
 }
+
+func TestMemoryStorePurgesOnlyTerminalHistory(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Unix(100, 0).UTC()
+	store.now = func() time.Time { return now }
+	ctx := context.Background()
+	terminal, _ := store.CreateExecution(ctx, CreateExecution{TaskName: "old", TaskVersion: 1})
+	claimed, _ := store.Claim(ctx, "worker", []TaskKey{{Name: "old", Version: 1}}, 1, time.Minute)
+	if err := store.Succeed(ctx, terminal.ID, claimed[0].LeaseToken, nil); err != nil {
+		t.Fatal(err)
+	}
+	active, _ := store.CreateExecution(ctx, CreateExecution{TaskName: "active", TaskVersion: 1})
+	run, _ := store.CreatePipelineRun(ctx, CreatePipelineRun{PipelineName: "old-flow", PipelineVersion: 1})
+	node, _ := store.CreateExecution(ctx, CreateExecution{TaskName: "node", TaskVersion: 1, PipelineRunID: &run.ID, NodeKey: "node"})
+	claimed, _ = store.Claim(ctx, "worker", []TaskKey{{Name: "node", Version: 1}}, 1, time.Minute)
+	if err := store.Succeed(ctx, node.ID, claimed[0].LeaseToken, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetPipelineRunStatus(ctx, run.ID, RunSucceeded, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := store.Purge(ctx, now.Add(time.Second), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Executions != 2 || result.PipelineRuns != 1 {
+		t.Fatalf("purge result = %+v", result)
+	}
+	if _, err = store.GetExecution(ctx, active.ID); err != nil {
+		t.Fatalf("active execution was purged: %v", err)
+	}
+	if _, err = store.GetExecution(ctx, terminal.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("terminal execution still exists: %v", err)
+	}
+}

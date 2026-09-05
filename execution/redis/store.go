@@ -788,6 +788,91 @@ func (s *Store) ExecutionCounts(ctx context.Context) ([]execution.ExecutionCount
 	return result, nil
 }
 
+func (s *Store) Purge(ctx context.Context, before time.Time, limit int) (execution.PurgeResult, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	type candidate struct {
+		finished time.Time
+		run      *execution.PipelineRun
+		item     *execution.Execution
+		nodes    []execution.Execution
+	}
+	candidates := make([]candidate, 0)
+	runs, err := s.ListPipelineRuns(ctx, execution.RunFilter{Statuses: []execution.RunStatus{
+		execution.RunSucceeded, execution.RunFailed, execution.RunCancelled,
+	}})
+	if err != nil {
+		return execution.PurgeResult{}, err
+	}
+	for index := range runs {
+		if runs[index].FinishedAt != nil && runs[index].FinishedAt.Before(before) {
+			nodes, listErr := s.ListRunExecutions(ctx, runs[index].ID)
+			if listErr != nil {
+				return execution.PurgeResult{}, listErr
+			}
+			candidates = append(candidates, candidate{finished: *runs[index].FinishedAt, run: &runs[index], nodes: nodes})
+		}
+	}
+	for _, status := range []execution.Status{execution.StatusSucceeded, execution.StatusFailed, execution.StatusCancelled} {
+		items, listErr := s.ListExecutions(ctx, execution.ListFilter{Status: status})
+		if listErr != nil {
+			return execution.PurgeResult{}, listErr
+		}
+		for index := range items {
+			if items[index].PipelineRunID == nil && items[index].FinishedAt != nil && items[index].FinishedAt.Before(before) {
+				candidates = append(candidates, candidate{finished: *items[index].FinishedAt, item: &items[index]})
+			}
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].finished.Before(candidates[j].finished) })
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	result := execution.PurgeResult{}
+	_, err = s.client.TxPipelined(ctx, func(pipe redislib.Pipeliner) error {
+		for _, candidate := range candidates {
+			if candidate.item != nil {
+				s.purgeExecution(ctx, pipe, *candidate.item)
+				result.Executions++
+				continue
+			}
+			for _, item := range candidate.nodes {
+				s.purgeExecution(ctx, pipe, item)
+				result.Executions++
+			}
+			run := *candidate.run
+			pipe.Del(ctx, s.pipelineKey(run.ID))
+			pipe.ZRem(ctx, s.runsKey(), run.ID.String())
+			pipe.ZRem(ctx, s.runStatusKey(run.Status), run.ID.String())
+			pipe.HIncrBy(ctx, s.pipelineCountsKey(), countField(run.PipelineName, string(run.Status)), -1)
+			if run.IdempotencyKey != "" {
+				pipe.Del(ctx, s.pipelineIdempotencyKey(run.PipelineName, run.IdempotencyKey))
+			}
+			result.PipelineRuns++
+		}
+		return nil
+	})
+	return result, err
+}
+
+func (s *Store) purgeExecution(ctx context.Context, pipe redislib.Pipeliner, item execution.Execution) {
+	pipe.Del(ctx, s.executionKey(item.ID), s.eventsKey(item.ID))
+	pipe.ZRem(ctx, s.executionsKey(), item.ID.String())
+	pipe.ZRem(ctx, s.taskIndexKey(item.TaskName), item.ID.String())
+	pipe.ZRem(ctx, s.statusKey(item.Status), item.ID.String())
+	pipe.ZRem(ctx, s.queueKey(item.TaskName), item.ID.String())
+	pipe.ZRem(ctx, s.leasesKey(), item.ID.String())
+	pipe.HIncrBy(ctx, s.executionCountsKey(), countField(item.TaskName, string(item.Status)), -1)
+	if item.IdempotencyKey != "" {
+		pipe.Del(ctx, s.idempotencyKey(item.TaskName, item.IdempotencyKey))
+	}
+	if item.PipelineRunID != nil {
+		pipe.Del(ctx, s.nodeKey(*item.PipelineRunID, item.NodeKey))
+		pipe.ZRem(ctx, s.runExecutionsKey(*item.PipelineRunID), item.ID.String())
+	}
+}
+
 func countField(name, status string) string { return name + "\x00" + status }
 
 func parseCount(field, rawCount string) (string, string, int64, error) {

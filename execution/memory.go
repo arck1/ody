@@ -543,6 +543,67 @@ func (s *MemoryStore) PipelineCounts(_ context.Context) ([]PipelineCount, error)
 	return result, nil
 }
 
+func (s *MemoryStore) Purge(_ context.Context, before time.Time, limit int) (PurgeResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if limit <= 0 {
+		limit = 1000
+	}
+	type candidate struct {
+		id       uuid.UUID
+		finished time.Time
+		pipeline bool
+	}
+	candidates := make([]candidate, 0)
+	for id, run := range s.runs {
+		if run.FinishedAt != nil && run.FinishedAt.Before(before) {
+			candidates = append(candidates, candidate{id: id, finished: *run.FinishedAt, pipeline: true})
+		}
+	}
+	for id, item := range s.executions {
+		if item.PipelineRunID == nil && item.FinishedAt != nil && item.FinishedAt.Before(before) {
+			candidates = append(candidates, candidate{id: id, finished: *item.FinishedAt})
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].finished.Before(candidates[j].finished) })
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	result := PurgeResult{}
+	for _, candidate := range candidates {
+		if candidate.pipeline {
+			run := s.runs[candidate.id]
+			for id, item := range s.executions {
+				if item.PipelineRunID != nil && *item.PipelineRunID == candidate.id {
+					s.deleteExecution(id, item)
+					result.Executions++
+				}
+			}
+			delete(s.runs, candidate.id)
+			if run.IdempotencyKey != "" {
+				delete(s.runIdempotent, run.PipelineName+"\x00"+run.IdempotencyKey)
+			}
+			result.PipelineRuns++
+			continue
+		}
+		item := s.executions[candidate.id]
+		s.deleteExecution(candidate.id, item)
+		result.Executions++
+	}
+	return result, nil
+}
+
+func (s *MemoryStore) deleteExecution(id uuid.UUID, item Execution) {
+	delete(s.executions, id)
+	delete(s.events, id)
+	if item.IdempotencyKey != "" {
+		delete(s.idempotent, item.TaskName+"\x00"+item.IdempotencyKey)
+	}
+	if item.PipelineRunID != nil {
+		delete(s.nodes, item.PipelineRunID.String()+"\x00"+item.NodeKey)
+	}
+}
+
 func (s *MemoryStore) owned(id, token uuid.UUID) (Execution, error) {
 	item, ok := s.executions[id]
 	if !ok {

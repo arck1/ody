@@ -47,7 +47,7 @@ func run(args []string) error {
 	}
 	remaining := global.Args()
 	if len(remaining) == 0 {
-		return errors.New("command is required: tasks|task|pipelines|pipeline|restart|cancel|serve")
+		return errors.New("command is required: tasks|task|pipelines|pipeline|restart|cancel|purge|serve")
 	}
 	ctx := context.Background()
 	store, closeStore, err := openStore(ctx, *backend, *dsn, *redisURL, *redisPrefix)
@@ -145,6 +145,18 @@ func command(ctx context.Context, service *monitoring.Service, store execution.S
 		}
 		item, err := service.Pipeline(ctx, id)
 		return printJSON(item, err)
+	case "purge":
+		flags := flag.NewFlagSet(name, flag.ContinueOnError)
+		olderThan := flags.Duration("older-than", 30*24*time.Hour, "remove terminal history older than this duration")
+		limit := flags.Int("limit", 1000, "maximum standalone executions and pipeline runs")
+		if err := flags.Parse(args); err != nil {
+			return err
+		}
+		if *olderThan <= 0 || *limit <= 0 {
+			return errors.New("older-than and limit must be positive")
+		}
+		result, err := store.Purge(ctx, time.Now().UTC().Add(-*olderThan), *limit)
+		return printJSON(result, err)
 	case "restart":
 		id, err := argumentID(args)
 		if err != nil {

@@ -168,3 +168,8 @@ type PipelineCount struct {
 	Status       RunStatus
 	Count        int64
 }
+
+type PurgeResult struct {
+	Executions   int64
+	PipelineRuns int64
+}

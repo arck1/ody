@@ -46,10 +46,16 @@ type StatisticsReader interface {
 	PipelineCounts(context.Context) ([]PipelineCount, error)
 }
 
+// Maintenance removes terminal history in bounded batches. Active and blocked work is preserved.
+type Maintenance interface {
+	Purge(context.Context, time.Time, int) (PurgeResult, error)
+}
+
 // Store is the complete persistence contract used by task, worker, pipeline, and monitoring.
 type Store interface {
 	Queue
 	ExecutionRepository
 	PipelineRepository
 	StatisticsReader
+	Maintenance
 }

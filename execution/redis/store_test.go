@@ -140,6 +140,26 @@ func TestStoreMaintainsBoundedStatistics(t *testing.T) {
 	require.Equal(t, []execution.PipelineCount{{PipelineName: "counted-flow", Status: execution.RunRunning, Count: 1}}, pipelineCounts)
 }
 
+func TestStorePurgesTerminalHistoryAndIndexes(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+	ctx := context.Background()
+	created, err := store.CreateExecution(ctx, execution.CreateExecution{TaskName: "purge", TaskVersion: 1, IdempotencyKey: "old"})
+	require.NoError(t, err)
+	claimed, err := store.Claim(ctx, "worker", []execution.TaskKey{{Name: "purge", Version: 1}}, 1, time.Minute)
+	require.NoError(t, err)
+	require.NoError(t, store.Succeed(ctx, created.ID, claimed[0].LeaseToken, nil))
+
+	result, err := store.Purge(ctx, time.Now().UTC().Add(time.Second), 10)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), result.Executions)
+	_, err = store.GetExecution(ctx, created.ID)
+	require.ErrorIs(t, err, execution.ErrNotFound)
+	recreated, err := store.CreateExecution(ctx, execution.CreateExecution{TaskName: "purge", TaskVersion: 1, IdempotencyKey: "old"})
+	require.NoError(t, err)
+	require.NotEqual(t, created.ID, recreated.ID)
+}
+
 func eventTypes(events []execution.Event) []execution.EventType {
 	result := make([]execution.EventType, len(events))
 	for index, event := range events {

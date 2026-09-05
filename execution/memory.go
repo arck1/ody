@@ -471,6 +471,46 @@ func (s *MemoryStore) SetPipelineRunStatus(_ context.Context, id uuid.UUID, stat
 	return nil
 }
 
+func (s *MemoryStore) ExecutionCounts(_ context.Context) ([]ExecutionCount, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	counts := make(map[[2]string]int64)
+	for _, item := range s.executions {
+		counts[[2]string{item.TaskName, string(item.Status)}]++
+	}
+	result := make([]ExecutionCount, 0, len(counts))
+	for key, count := range counts {
+		result = append(result, ExecutionCount{TaskName: key[0], Status: Status(key[1]), Count: count})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].TaskName == result[j].TaskName {
+			return result[i].Status < result[j].Status
+		}
+		return result[i].TaskName < result[j].TaskName
+	})
+	return result, nil
+}
+
+func (s *MemoryStore) PipelineCounts(_ context.Context) ([]PipelineCount, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	counts := make(map[[2]string]int64)
+	for _, run := range s.runs {
+		counts[[2]string{run.PipelineName, string(run.Status)}]++
+	}
+	result := make([]PipelineCount, 0, len(counts))
+	for key, count := range counts {
+		result = append(result, PipelineCount{PipelineName: key[0], Status: RunStatus(key[1]), Count: count})
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].PipelineName == result[j].PipelineName {
+			return result[i].Status < result[j].Status
+		}
+		return result[i].PipelineName < result[j].PipelineName
+	})
+	return result, nil
+}
+
 func (s *MemoryStore) owned(id, token uuid.UUID) (Execution, error) {
 	item, ok := s.executions[id]
 	if !ok {

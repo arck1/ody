@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -11,6 +12,15 @@ import (
 
 	"schedulor/execution"
 )
+
+func newTestStore(t *testing.T) (*Store, func()) {
+	t.Helper()
+	server := miniredis.RunT(t)
+	client := redislib.NewClient(&redislib.Options{Addr: server.Addr()})
+	store, err := New(client, Options{Prefix: "test:{count}:"})
+	require.NoError(t, err)
+	return store, func() { require.NoError(t, client.Close()) }
+}
 
 func TestStoreExecutionLifecycle(t *testing.T) {
 	server := miniredis.RunT(t)
@@ -107,6 +117,27 @@ func TestStoreReapsExpiredFinalLease(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, execution.StatusFailed, item.Status)
 	require.Equal(t, "lease expired after maximum attempts", item.LastError)
+}
+
+func TestStoreMaintainsBoundedStatistics(t *testing.T) {
+	store, cleanup := newTestStore(t)
+	defer cleanup()
+	ctx := context.Background()
+	created, err := store.CreateExecution(ctx, execution.CreateExecution{TaskName: "counted", TaskVersion: 1})
+	require.NoError(t, err)
+	claimed, err := store.Claim(ctx, "worker", []execution.TaskKey{{Name: "counted", Version: 1}}, 1, time.Minute)
+	require.NoError(t, err)
+	require.NoError(t, store.Succeed(ctx, created.ID, claimed[0].LeaseToken, json.RawMessage(`1`)))
+	run, err := store.CreatePipelineRun(ctx, execution.CreatePipelineRun{PipelineName: "counted-flow", PipelineVersion: 1})
+	require.NoError(t, err)
+	require.NoError(t, store.SetPipelineRunStatus(ctx, run.ID, execution.RunRunning, ""))
+
+	executionCounts, err := store.ExecutionCounts(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []execution.ExecutionCount{{TaskName: "counted", Status: execution.StatusSucceeded, Count: 1}}, executionCounts)
+	pipelineCounts, err := store.PipelineCounts(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []execution.PipelineCount{{PipelineName: "counted-flow", Status: execution.RunRunning, Count: 1}}, pipelineCounts)
 }
 
 func eventTypes(events []execution.Event) []execution.EventType {

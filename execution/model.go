@@ -140,3 +140,15 @@ type Event struct {
 	Error       string    `json:"error,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 }
+
+type ExecutionCount struct {
+	TaskName string
+	Status   Status
+	Count    int64
+}
+
+type PipelineCount struct {
+	PipelineName string
+	Status       RunStatus
+	Count        int64
+}

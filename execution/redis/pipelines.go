@@ -22,6 +22,7 @@ func (s *Store) CreatePipelineRun(ctx context.Context, request execution.CreateP
 	}
 	_, err = s.client.TxPipelined(ctx, func(pipe redislib.Pipeliner) error {
 		pipe.HSet(ctx, s.pipelineKey(run.ID), encodeRun(run))
+		pipe.HIncrBy(ctx, s.pipelineCountsKey(), countField(run.PipelineName, string(run.Status)), 1)
 		pipe.ZAdd(ctx, s.runsKey(), redislib.Z{Score: score(now), Member: run.ID.String()})
 		pipe.ZAdd(ctx, s.runStatusKey(run.Status), redislib.Z{Score: score(now), Member: run.ID.String()})
 		return nil
@@ -111,10 +112,38 @@ func (s *Store) SetPipelineRunStatus(ctx context.Context, id uuid.UUID, status e
 		}
 		_, getErr = tx.TxPipelined(ctx, func(pipe redislib.Pipeliner) error {
 			pipe.HSet(ctx, s.pipelineKey(id), encodeRun(run))
+			if previous != status {
+				pipe.HIncrBy(ctx, s.pipelineCountsKey(), countField(run.PipelineName, string(previous)), -1)
+				pipe.HIncrBy(ctx, s.pipelineCountsKey(), countField(run.PipelineName, string(status)), 1)
+			}
 			pipe.ZRem(ctx, s.runStatusKey(previous), id.String())
 			pipe.ZAdd(ctx, s.runStatusKey(status), redislib.Z{Score: score(run.CreatedAt), Member: id.String()})
 			return nil
 		})
 		return getErr
 	})
+}
+
+func (s *Store) PipelineCounts(ctx context.Context) ([]execution.PipelineCount, error) {
+	values, err := s.client.HGetAll(ctx, s.pipelineCountsKey()).Result()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]execution.PipelineCount, 0, len(values))
+	for field, rawCount := range values {
+		name, status, count, parseErr := parseCount(field, rawCount)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		if count > 0 {
+			result = append(result, execution.PipelineCount{PipelineName: name, Status: execution.RunStatus(status), Count: count})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].PipelineName == result[j].PipelineName {
+			return result[i].Status < result[j].Status
+		}
+		return result[i].PipelineName < result[j].PipelineName
+	})
+	return result, nil
 }

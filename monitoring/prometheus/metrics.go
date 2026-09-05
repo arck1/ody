@@ -20,7 +20,7 @@ type Metrics struct {
 }
 
 // New registers transition metrics and a collector for current persisted state.
-func New(registerer prom.Registerer, store execution.Store) (*Metrics, error) {
+func New(registerer prom.Registerer, store execution.StatisticsReader) (*Metrics, error) {
 	if registerer == nil {
 		return nil, errors.New("prometheus registerer is nil")
 	}
@@ -79,13 +79,13 @@ func (m *Metrics) Transition(_ context.Context, item execution.Execution, status
 }
 
 type storeCollector struct {
-	store          execution.Store
+	store          execution.StatisticsReader
 	executionsDesc *prom.Desc
 	pipelinesDesc  *prom.Desc
 	scrapeErrors   *prom.Desc
 }
 
-func newStoreCollector(store execution.Store) *storeCollector {
+func newStoreCollector(store execution.StatisticsReader) *storeCollector {
 	return &storeCollector{
 		store:          store,
 		executionsDesc: prom.NewDesc("schedulor_store_task_executions", "Current persisted task executions by task and status.", []string{"task", "status"}, nil),
@@ -103,25 +103,17 @@ func (c *storeCollector) Describe(ch chan<- *prom.Desc) {
 func (c *storeCollector) Collect(ch chan<- prom.Metric) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	tasks, taskErr := c.store.ListExecutions(ctx, execution.ListFilter{})
-	runs, runErr := c.store.ListPipelineRuns(ctx, nil)
+	tasks, taskErr := c.store.ExecutionCounts(ctx)
+	runs, runErr := c.store.PipelineCounts(ctx)
 	if taskErr != nil || runErr != nil {
 		ch <- prom.MustNewConstMetric(c.scrapeErrors, prom.GaugeValue, 1)
 		return
 	}
 	ch <- prom.MustNewConstMetric(c.scrapeErrors, prom.GaugeValue, 0)
-	taskCounts := make(map[[2]string]float64)
 	for _, item := range tasks {
-		taskCounts[[2]string{item.TaskName, string(item.Status)}]++
+		ch <- prom.MustNewConstMetric(c.executionsDesc, prom.GaugeValue, float64(item.Count), item.TaskName, string(item.Status))
 	}
-	for labels, count := range taskCounts {
-		ch <- prom.MustNewConstMetric(c.executionsDesc, prom.GaugeValue, count, labels[0], labels[1])
-	}
-	runCounts := make(map[[2]string]float64)
 	for _, run := range runs {
-		runCounts[[2]string{run.PipelineName, string(run.Status)}]++
-	}
-	for labels, count := range runCounts {
-		ch <- prom.MustNewConstMetric(c.pipelinesDesc, prom.GaugeValue, count, labels[0], labels[1])
+		ch <- prom.MustNewConstMetric(c.pipelinesDesc, prom.GaugeValue, float64(run.Count), run.PipelineName, string(run.Status))
 	}
 }

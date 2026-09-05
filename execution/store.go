@@ -40,9 +40,16 @@ type PipelineRepository interface {
 	ReleaseExecution(context.Context, uuid.UUID, json.RawMessage, time.Time) error
 }
 
+// StatisticsReader exposes bounded aggregation queries for monitoring scrapes.
+type StatisticsReader interface {
+	ExecutionCounts(context.Context) ([]ExecutionCount, error)
+	PipelineCounts(context.Context) ([]PipelineCount, error)
+}
+
 // Store is the complete persistence contract used by task, worker, pipeline, and monitoring.
 type Store interface {
 	Queue
 	ExecutionRepository
 	PipelineRepository
+	StatisticsReader
 }

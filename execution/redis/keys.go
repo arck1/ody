@@ -18,6 +18,8 @@ func (s *Store) executionKey(id uuid.UUID) string { return s.prefix + "execution
 func (s *Store) eventsKey(id uuid.UUID) string    { return s.prefix + "events:" + id.String() }
 func (s *Store) executionsKey() string            { return s.prefix + "executions" }
 func (s *Store) leasesKey() string                { return s.prefix + "leases" }
+func (s *Store) executionCountsKey() string       { return s.prefix + "counts:executions" }
+func (s *Store) pipelineCountsKey() string        { return s.prefix + "counts:pipelines" }
 func (s *Store) queueKey(name string) string      { return s.prefix + "queue:" + encodeKey(name) }
 func (s *Store) taskIndexKey(name string) string  { return s.prefix + "task:" + encodeKey(name) }
 

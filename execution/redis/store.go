@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -95,6 +97,7 @@ func (s *Store) CreateExecution(ctx context.Context, request execution.CreateExe
 		}
 		_, encodeErr = tx.TxPipelined(ctx, func(pipe redislib.Pipeliner) error {
 			pipe.Set(ctx, s.executionKey(item.ID), encoded, 0)
+			pipe.HIncrBy(ctx, s.executionCountsKey(), countField(item.TaskName, string(item.Status)), 1)
 			pipe.ZAdd(ctx, s.executionsKey(), redislib.Z{Score: score(item.CreatedAt), Member: item.ID.String()})
 			pipe.ZAdd(ctx, s.taskIndexKey(item.TaskName), redislib.Z{Score: score(item.CreatedAt), Member: item.ID.String()})
 			pipe.ZAdd(ctx, s.statusKey(item.Status), redislib.Z{Score: score(item.CreatedAt), Member: item.ID.String()})
@@ -535,6 +538,8 @@ func (s *Store) RestartExecution(ctx context.Context, id uuid.UUID, availableAt 
 		}
 		_, getErr = tx.TxPipelined(ctx, func(pipe redislib.Pipeliner) error {
 			pipe.Set(ctx, s.executionKey(id), encoded, 0)
+			pipe.HIncrBy(ctx, s.executionCountsKey(), countField(item.TaskName, string(previous)), -1)
+			pipe.HIncrBy(ctx, s.executionCountsKey(), countField(item.TaskName, string(item.Status)), 1)
 			pipe.ZRem(ctx, s.statusKey(previous), id.String())
 			pipe.ZAdd(ctx, s.statusKey(item.Status), redislib.Z{Score: score(item.CreatedAt), Member: id.String()})
 			pipe.ZRem(ctx, s.leasesKey(), id.String())
@@ -626,6 +631,10 @@ func (s *Store) RestartPipelineSubgraph(ctx context.Context, request execution.R
 					return encodeErr
 				}
 				pipe.Set(ctx, s.executionKey(item.ID), encoded, 0)
+				if previous != item.Status {
+					pipe.HIncrBy(ctx, s.executionCountsKey(), countField(item.TaskName, string(previous)), -1)
+					pipe.HIncrBy(ctx, s.executionCountsKey(), countField(item.TaskName, string(item.Status)), 1)
+				}
 				pipe.ZRem(ctx, s.statusKey(previous), item.ID.String())
 				pipe.ZAdd(ctx, s.statusKey(item.Status), redislib.Z{Score: score(item.CreatedAt), Member: item.ID.String()})
 				pipe.ZRem(ctx, s.leasesKey(), item.ID.String())
@@ -640,6 +649,10 @@ func (s *Store) RestartPipelineSubgraph(ctx context.Context, request execution.R
 				return execution.ErrNotFound
 			}
 			pipe.HSet(ctx, s.pipelineKey(run.ID), encodeRun(run))
+			if previousRunStatus != run.Status {
+				pipe.HIncrBy(ctx, s.pipelineCountsKey(), countField(run.PipelineName, string(previousRunStatus)), -1)
+				pipe.HIncrBy(ctx, s.pipelineCountsKey(), countField(run.PipelineName, string(run.Status)), 1)
+			}
 			pipe.ZRem(ctx, s.runStatusKey(previousRunStatus), run.ID.String())
 			pipe.ZAdd(ctx, s.runStatusKey(run.Status), redislib.Z{Score: score(run.CreatedAt), Member: run.ID.String()})
 			return nil
@@ -672,6 +685,8 @@ func (s *Store) ReleaseExecution(ctx context.Context, id uuid.UUID, input json.R
 		}
 		_, getErr = tx.TxPipelined(ctx, func(pipe redislib.Pipeliner) error {
 			pipe.Set(ctx, s.executionKey(id), encoded, 0)
+			pipe.HIncrBy(ctx, s.executionCountsKey(), countField(item.TaskName, string(execution.StatusBlocked)), -1)
+			pipe.HIncrBy(ctx, s.executionCountsKey(), countField(item.TaskName, string(execution.StatusPending)), 1)
 			pipe.ZRem(ctx, s.statusKey(execution.StatusBlocked), id.String())
 			pipe.ZAdd(ctx, s.statusKey(execution.StatusPending), redislib.Z{Score: score(item.CreatedAt), Member: id.String()})
 			pipe.ZAdd(ctx, s.queueKey(item.TaskName), redislib.Z{Score: score(item.AvailableAt), Member: id.String()})
@@ -719,6 +734,10 @@ func (s *Store) saveTransition(ctx context.Context, tx *redislib.Tx, item execut
 	}
 	_, err = tx.TxPipelined(ctx, func(pipe redislib.Pipeliner) error {
 		pipe.Set(ctx, s.executionKey(item.ID), encoded, 0)
+		if previous != item.Status {
+			pipe.HIncrBy(ctx, s.executionCountsKey(), countField(item.TaskName, string(previous)), -1)
+			pipe.HIncrBy(ctx, s.executionCountsKey(), countField(item.TaskName, string(item.Status)), 1)
+		}
 		pipe.ZRem(ctx, s.statusKey(previous), item.ID.String())
 		pipe.ZAdd(ctx, s.statusKey(item.Status), redislib.Z{Score: score(item.CreatedAt), Member: item.ID.String()})
 		pipe.ZRem(ctx, s.leasesKey(), item.ID.String())
@@ -736,6 +755,44 @@ func (s *Store) saveTransition(ctx context.Context, tx *redislib.Tx, item execut
 		return nil
 	})
 	return err
+}
+
+func (s *Store) ExecutionCounts(ctx context.Context) ([]execution.ExecutionCount, error) {
+	values, err := s.client.HGetAll(ctx, s.executionCountsKey()).Result()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]execution.ExecutionCount, 0, len(values))
+	for field, rawCount := range values {
+		name, status, count, parseErr := parseCount(field, rawCount)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		if count > 0 {
+			result = append(result, execution.ExecutionCount{TaskName: name, Status: execution.Status(status), Count: count})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].TaskName == result[j].TaskName {
+			return result[i].Status < result[j].Status
+		}
+		return result[i].TaskName < result[j].TaskName
+	})
+	return result, nil
+}
+
+func countField(name, status string) string { return name + "\x00" + status }
+
+func parseCount(field, rawCount string) (string, string, int64, error) {
+	parts := strings.SplitN(field, "\x00", 2)
+	if len(parts) != 2 {
+		return "", "", 0, fmt.Errorf("invalid redis count field %q", field)
+	}
+	count, err := strconv.ParseInt(rawCount, 10, 64)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("invalid redis count %q: %w", rawCount, err)
+	}
+	return parts[0], parts[1], count, nil
 }
 
 func encodeEvent(item execution.Execution, eventType execution.EventType, errorText string, now time.Time) ([]byte, error) {

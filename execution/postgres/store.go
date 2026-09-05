@@ -490,6 +490,40 @@ func (s *Store) Events(ctx context.Context, id uuid.UUID) ([]execution.Event, er
 	return items, rows.Err()
 }
 
+func (s *Store) ExecutionCounts(ctx context.Context) ([]execution.ExecutionCount, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT task_name,status,count(*) FROM task_executions GROUP BY task_name,status ORDER BY task_name,status`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []execution.ExecutionCount{}
+	for rows.Next() {
+		var item execution.ExecutionCount
+		if err = rows.Scan(&item.TaskName, &item.Status, &item.Count); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) PipelineCounts(ctx context.Context) ([]execution.PipelineCount, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT pipeline_name,status,count(*) FROM pipeline_runs GROUP BY pipeline_name,status ORDER BY pipeline_name,status`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []execution.PipelineCount{}
+	for rows.Next() {
+		var item execution.PipelineCount
+		if err = rows.Scan(&item.PipelineName, &item.Status, &item.Count); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
 func (s *Store) CreatePipelineRun(ctx context.Context, r execution.CreatePipelineRun) (execution.PipelineRun, error) {
 	now := time.Now().UTC()
 	run := execution.PipelineRun{ID: uuid.New(), PipelineName: r.PipelineName, PipelineVersion: r.PipelineVersion, Input: r.Input, Status: execution.RunPending, CreatedAt: now, UpdatedAt: now}

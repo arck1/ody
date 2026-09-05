@@ -447,7 +447,7 @@ func (s *Store) Succeed(ctx context.Context, id, token uuid.UUID, output json.Ra
 }
 
 // Retry reschedules an owned execution, or fails it when its attempt budget is exhausted.
-func (s *Store) Retry(ctx context.Context, id, token uuid.UUID, errorText string, availableAt time.Time) error {
+func (s *Store) Retry(ctx context.Context, id, token uuid.UUID, errorText string, delay time.Duration) error {
 	return s.transition(ctx, id, token, func(item *execution.Execution, now time.Time) (execution.EventType, string, bool) {
 		item.LastError = errorText
 		clearLease(item)
@@ -455,7 +455,7 @@ func (s *Store) Retry(ctx context.Context, id, token uuid.UUID, errorText string
 			item.Status, item.FinishedAt = execution.StatusFailed, new(now)
 			return execution.EventFailed, errorText, false
 		}
-		item.Status, item.AvailableAt = execution.StatusRetry, availableAt.UTC()
+		item.Status, item.AvailableAt = execution.StatusRetry, now.Add(delay)
 		return execution.EventRetried, errorText, true
 	})
 }

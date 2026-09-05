@@ -15,7 +15,7 @@ type Queue interface {
 	ReapExpired(context.Context) ([]uuid.UUID, error)
 	Heartbeat(context.Context, uuid.UUID, uuid.UUID, time.Duration) error
 	Succeed(context.Context, uuid.UUID, uuid.UUID, json.RawMessage) error
-	Retry(context.Context, uuid.UUID, uuid.UUID, string, time.Time) error
+	Retry(context.Context, uuid.UUID, uuid.UUID, string, time.Duration) error
 	Fail(context.Context, uuid.UUID, uuid.UUID, string) error
 }
 

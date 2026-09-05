@@ -48,7 +48,6 @@ type PipelineDetails struct {
 
 type Service struct {
 	store             execution.Store
-	now               func() time.Time
 	pipelineRestarter PipelineRestarter
 }
 
@@ -68,7 +67,7 @@ func New(store execution.Store, options ...Option) (*Service, error) {
 	if store == nil {
 		return nil, errors.New("monitoring store is nil")
 	}
-	service := &Service{store: store, now: func() time.Time { return time.Now().UTC() }}
+	service := &Service{store: store}
 	for _, option := range options {
 		option(service)
 	}
@@ -118,7 +117,7 @@ func (s *Service) RestartTask(ctx context.Context, id uuid.UUID) (execution.Exec
 		}
 		return s.pipelineRestarter.RestartExecution(ctx, id)
 	}
-	return s.store.RestartExecution(ctx, id, s.now())
+	return s.store.RestartExecution(ctx, id, time.Time{})
 }
 
 func (s *Service) CancelTask(ctx context.Context, id uuid.UUID, reason string) error {

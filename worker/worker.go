@@ -290,7 +290,7 @@ func (w *Worker) resolve(ctx context.Context, item execution.Execution, output j
 	if !ok {
 		delay = retryPolicy(item.Attempt)
 	}
-	if err := w.store.Retry(ctx, item.ID, item.LeaseToken, handlerErr.Error(), time.Now().UTC().Add(delay)); err != nil {
+	if err := w.store.Retry(ctx, item.ID, item.LeaseToken, handlerErr.Error(), delay); err != nil {
 		w.observer.Transition(ctx, item, execution.StatusRunning, err)
 		return
 	}

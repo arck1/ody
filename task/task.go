@@ -101,7 +101,7 @@ func (d Definition[I, O]) Enqueue(ctx context.Context, store ExecutionCreator, i
 	}
 	request := execution.CreateExecution{
 		TaskName: d.Name(), TaskVersion: d.Version(), Input: raw,
-		MaxAttempts: d.MaxAttempts(), AvailableAt: time.Now().UTC(),
+		MaxAttempts: d.MaxAttempts(),
 	}
 	for _, option := range options {
 		if option != nil {

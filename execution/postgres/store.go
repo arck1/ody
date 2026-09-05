@@ -269,8 +269,12 @@ func (s *Store) Heartbeat(ctx context.Context, id, token uuid.UUID, lease time.D
 func (s *Store) Succeed(ctx context.Context, id, token uuid.UUID, output json.RawMessage) error {
 	return s.transition(ctx, id, token, execution.StatusSucceeded, execution.EventSucceeded, "", output, time.Time{})
 }
-func (s *Store) Retry(ctx context.Context, id, token uuid.UUID, text string, at time.Time) error {
-	return s.transition(ctx, id, token, execution.StatusRetry, execution.EventRetried, text, nil, at)
+func (s *Store) Retry(ctx context.Context, id, token uuid.UUID, text string, delay time.Duration) error {
+	var databaseNow time.Time
+	if err := s.db.QueryRowContext(ctx, `SELECT now()`).Scan(&databaseNow); err != nil {
+		return err
+	}
+	return s.transition(ctx, id, token, execution.StatusRetry, execution.EventRetried, text, nil, databaseNow.Add(delay))
 }
 func (s *Store) Fail(ctx context.Context, id, token uuid.UUID, text string) error {
 	return s.transition(ctx, id, token, execution.StatusFailed, execution.EventFailed, text, nil, time.Time{})

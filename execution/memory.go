@@ -237,7 +237,7 @@ func (s *MemoryStore) Succeed(_ context.Context, id, token uuid.UUID, output jso
 	return nil
 }
 
-func (s *MemoryStore) Retry(_ context.Context, id, token uuid.UUID, errorText string, availableAt time.Time) error {
+func (s *MemoryStore) Retry(_ context.Context, id, token uuid.UUID, errorText string, delay time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	item, err := s.owned(id, token)
@@ -253,7 +253,7 @@ func (s *MemoryStore) Retry(_ context.Context, id, token uuid.UUID, errorText st
 		s.appendEvent(item, EventFailed, errorText)
 		return nil
 	}
-	item.Status, item.AvailableAt = StatusRetry, availableAt
+	item.Status, item.AvailableAt = StatusRetry, s.now().Add(delay)
 	s.executions[id] = item
 	s.appendEvent(item, EventRetried, errorText)
 	return nil

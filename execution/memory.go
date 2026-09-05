@@ -278,6 +278,9 @@ func (s *MemoryStore) CancelExecution(_ context.Context, id uuid.UUID, reason st
 	if !ok {
 		return ErrNotFound
 	}
+	if item.Status == StatusSucceeded || item.Status == StatusFailed || item.Status == StatusCancelled {
+		return ErrNotFound
+	}
 	now := s.now()
 	item.Status, item.LastError, item.FinishedAt = StatusCancelled, reason, new(now)
 	item.LeaseToken, item.LeaseOwner, item.LeaseUntil = uuid.Nil, "", time.Time{}
@@ -293,6 +296,9 @@ func (s *MemoryStore) RestartExecution(_ context.Context, id uuid.UUID, availabl
 	if !ok {
 		return Execution{}, ErrNotFound
 	}
+	if item.PipelineRunID != nil {
+		return Execution{}, ErrPipelineExecution
+	}
 	if item.Status == StatusPending || item.Status == StatusRetry || item.Status == StatusRunning {
 		return Execution{}, ErrActive
 	}
@@ -304,14 +310,93 @@ func (s *MemoryStore) RestartExecution(_ context.Context, id uuid.UUID, availabl
 	item.LeaseToken, item.LeaseOwner, item.LeaseUntil = uuid.Nil, "", time.Time{}
 	s.executions[id] = item
 	s.appendEvent(item, EventRestarted, "")
-	if item.PipelineRunID != nil {
-		run, exists := s.runs[*item.PipelineRunID]
-		if exists {
-			run.Status, run.Error, run.FinishedAt, run.UpdatedAt = RunRunning, "", nil, s.now()
-			s.runs[run.ID] = run
+	return cloneExecution(item), nil
+}
+
+func (s *MemoryStore) RestartPipelineSubgraph(_ context.Context, request RestartSubgraph) (Execution, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.runs[request.RunID]
+	if !ok {
+		return Execution{}, ErrNotFound
+	}
+	descendants := make(map[string]struct{}, len(request.DescendantKeys))
+	for _, key := range request.DescendantKeys {
+		descendants[key] = struct{}{}
+	}
+	var root Execution
+	foundRoot := false
+	for _, item := range s.executions {
+		if item.PipelineRunID == nil || *item.PipelineRunID != request.RunID {
+			continue
+		}
+		if item.NodeKey != request.RootNodeKey {
+			if _, affected := descendants[item.NodeKey]; !affected {
+				continue
+			}
+		}
+		if item.Status == StatusPending || item.Status == StatusRetry || item.Status == StatusRunning {
+			return Execution{}, ErrActive
+		}
+		if item.NodeKey == request.RootNodeKey {
+			root, foundRoot = item, true
 		}
 	}
-	return cloneExecution(item), nil
+	if !foundRoot {
+		return Execution{}, ErrNotFound
+	}
+	now := s.now()
+	if request.AvailableAt.IsZero() {
+		request.AvailableAt = now
+	}
+	for id, item := range s.executions {
+		if item.PipelineRunID == nil || *item.PipelineRunID != request.RunID {
+			continue
+		}
+		status := Status("")
+		switch {
+		case item.NodeKey == request.RootNodeKey:
+			status = StatusPending
+		case hasKey(descendants, item.NodeKey):
+			status = StatusBlocked
+		default:
+			continue
+		}
+		item.Status, item.Attempt, item.AvailableAt = status, 0, request.AvailableAt
+		item.Output, item.LastError, item.StartedAt, item.FinishedAt = nil, "", nil, nil
+		item.LeaseToken, item.LeaseOwner, item.LeaseUntil = uuid.Nil, "", time.Time{}
+		s.executions[id] = item
+		s.appendEvent(item, EventRestarted, "")
+		if id == root.ID {
+			root = item
+		}
+	}
+	run.Status, run.Error, run.FinishedAt, run.UpdatedAt = RunRunning, "", nil, now
+	s.runs[run.ID] = run
+	return cloneExecution(root), nil
+}
+
+func (s *MemoryStore) ReleaseExecution(_ context.Context, id uuid.UUID, input json.RawMessage, availableAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := s.executions[id]
+	if !ok {
+		return ErrNotFound
+	}
+	if item.Status != StatusBlocked {
+		return ErrActive
+	}
+	if availableAt.IsZero() {
+		availableAt = s.now()
+	}
+	item.Status, item.Input, item.AvailableAt = StatusPending, cloneJSON(input), availableAt
+	s.executions[id] = item
+	return nil
+}
+
+func hasKey(values map[string]struct{}, key string) bool {
+	_, ok := values[key]
+	return ok
 }
 
 func (s *MemoryStore) Events(_ context.Context, id uuid.UUID) ([]Event, error) {

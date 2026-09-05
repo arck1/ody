@@ -22,7 +22,10 @@ func (k TaskKey) String() string { return fmt.Sprintf("%s@v%d", k.Name, k.Versio
 type Status string
 
 const (
-	StatusPending   Status = "pending"
+	StatusPending Status = "pending"
+	// StatusBlocked is used only for an existing pipeline descendant waiting for restarted
+	// predecessors. Queue implementations must never claim blocked executions.
+	StatusBlocked   Status = "blocked"
 	StatusRunning   Status = "running"
 	StatusRetry     Status = "retry"
 	StatusSucceeded Status = "succeeded"
@@ -41,9 +44,10 @@ const (
 )
 
 var (
-	ErrNotFound  = errors.New("execution not found")
-	ErrLeaseLost = errors.New("execution lease lost")
-	ErrActive    = errors.New("execution is active")
+	ErrNotFound          = errors.New("execution not found")
+	ErrLeaseLost         = errors.New("execution lease lost")
+	ErrActive            = errors.New("execution is active")
+	ErrPipelineExecution = errors.New("pipeline execution requires pipeline coordinator")
 )
 
 // Execution is one durable invocation of a task definition.
@@ -104,6 +108,15 @@ type CreatePipelineRun struct {
 	PipelineName    string
 	PipelineVersion int
 	Input           json.RawMessage
+}
+
+// RestartSubgraph describes a pipeline restart compiled from the registered DAG. RootNodeKey is
+// made pending immediately; descendants are reset to blocked until Engine releases them.
+type RestartSubgraph struct {
+	RunID          uuid.UUID
+	RootNodeKey    string
+	DescendantKeys []string
+	AvailableAt    time.Time
 }
 
 type EventType string

@@ -47,17 +47,32 @@ type PipelineDetails struct {
 }
 
 type Service struct {
-	store execution.Store
-	now   func() time.Time
+	store             execution.Store
+	now               func() time.Time
+	pipelineRestarter PipelineRestarter
+}
+
+type PipelineRestarter interface {
+	RestartExecution(context.Context, uuid.UUID) (execution.Execution, error)
+}
+
+type Option func(*Service)
+
+func WithPipelineRestarter(restarter PipelineRestarter) Option {
+	return func(service *Service) { service.pipelineRestarter = restarter }
 }
 
 var _ API = (*Service)(nil)
 
-func New(store execution.Store) (*Service, error) {
+func New(store execution.Store, options ...Option) (*Service, error) {
 	if store == nil {
 		return nil, errors.New("monitoring store is nil")
 	}
-	return &Service{store: store, now: func() time.Time { return time.Now().UTC() }}, nil
+	service := &Service{store: store, now: func() time.Time { return time.Now().UTC() }}
+	for _, option := range options {
+		option(service)
+	}
+	return service, nil
 }
 
 func (s *Service) ListTasks(ctx context.Context, filter execution.ListFilter) ([]execution.Execution, error) {
@@ -93,6 +108,16 @@ func (s *Service) Pipeline(ctx context.Context, id uuid.UUID) (PipelineDetails, 
 }
 
 func (s *Service) RestartTask(ctx context.Context, id uuid.UUID) (execution.Execution, error) {
+	item, err := s.store.GetExecution(ctx, id)
+	if err != nil {
+		return execution.Execution{}, err
+	}
+	if item.PipelineRunID != nil {
+		if s.pipelineRestarter == nil {
+			return execution.Execution{}, execution.ErrPipelineExecution
+		}
+		return s.pipelineRestarter.RestartExecution(ctx, id)
+	}
 	return s.store.RestartExecution(ctx, id, s.now())
 }
 

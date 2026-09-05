@@ -36,6 +36,8 @@ type PipelineRepository interface {
 	GetPipelineRun(context.Context, uuid.UUID) (PipelineRun, error)
 	ListPipelineRuns(context.Context, []RunStatus) ([]PipelineRun, error)
 	SetPipelineRunStatus(context.Context, uuid.UUID, RunStatus, string) error
+	RestartPipelineSubgraph(context.Context, RestartSubgraph) (Execution, error)
+	ReleaseExecution(context.Context, uuid.UUID, json.RawMessage, time.Time) error
 }
 
 // Store is the complete persistence contract used by task, worker, pipeline, and monitoring.

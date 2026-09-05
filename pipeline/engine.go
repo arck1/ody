@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -86,7 +87,8 @@ func (e *Engine) Advance(ctx context.Context, runID uuid.UUID) error {
 	}
 	created := false
 	for _, node := range definition.nodes {
-		if _, exists := byNode[node.key]; exists {
+		existing, exists := byNode[node.key]
+		if exists && existing.Status != execution.StatusBlocked {
 			continue
 		}
 		ready := true
@@ -101,8 +103,15 @@ func (e *Engine) Advance(ctx context.Context, runID uuid.UUID) error {
 		}
 		input, buildErr := safeBuildInput(node, run.Input, outputs)
 		if buildErr != nil {
-			_ = e.store.SetPipelineRunStatus(ctx, runID, execution.RunFailed, fmt.Sprintf("build node %s input: %v", node.key, buildErr))
-			return buildErr
+			statusErr := e.store.SetPipelineRunStatus(ctx, runID, execution.RunFailed, fmt.Sprintf("build node %s input: %v", node.key, buildErr))
+			return errors.Join(buildErr, statusErr)
+		}
+		if exists {
+			if err = e.store.ReleaseExecution(ctx, existing.ID, input, existing.AvailableAt); err != nil {
+				return err
+			}
+			created = true
+			continue
 		}
 		request := execution.CreateExecution{
 			TaskName: node.taskName, TaskVersion: node.taskVersion,
@@ -135,6 +144,60 @@ func (e *Engine) Advance(ctx context.Context, runID uuid.UUID) error {
 		return e.store.SetPipelineRunStatus(ctx, runID, execution.RunRunning, "")
 	}
 	return nil
+}
+
+// RestartExecution safely restarts a standalone task or a pipeline node and its existing
+// descendants. Pipeline descendants remain blocked until their rebuilt dependencies succeed.
+func (e *Engine) RestartExecution(ctx context.Context, executionID uuid.UUID) (execution.Execution, error) {
+	item, err := e.store.GetExecution(ctx, executionID)
+	if err != nil {
+		return execution.Execution{}, err
+	}
+	if item.PipelineRunID == nil {
+		return e.store.RestartExecution(ctx, executionID, time.Time{})
+	}
+	run, err := e.store.GetPipelineRun(ctx, *item.PipelineRunID)
+	if err != nil {
+		return execution.Execution{}, err
+	}
+	definition, ok := e.registry.definitions[registryKey(run.PipelineName, run.PipelineVersion)]
+	if !ok {
+		return execution.Execution{}, fmt.Errorf("pipeline definition %s is not registered", registryKey(run.PipelineName, run.PipelineVersion))
+	}
+	descendants, found := descendantKeys(definition, item.NodeKey)
+	if !found {
+		return execution.Execution{}, fmt.Errorf("pipeline node %q is not registered", item.NodeKey)
+	}
+	restarted, err := e.store.RestartPipelineSubgraph(ctx, execution.RestartSubgraph{
+		RunID: *item.PipelineRunID, RootNodeKey: item.NodeKey, DescendantKeys: descendants,
+	})
+	if err != nil {
+		return execution.Execution{}, err
+	}
+	if err = e.Advance(ctx, *item.PipelineRunID); err != nil {
+		return execution.Execution{}, err
+	}
+	return restarted, nil
+}
+
+func descendantKeys(definition compiledDefinition, root string) ([]string, bool) {
+	affected := map[string]struct{}{root: {}}
+	found := false
+	result := make([]string, 0)
+	for _, node := range definition.nodes {
+		if node.key == root {
+			found = true
+			continue
+		}
+		for _, dependency := range node.dependencies {
+			if _, ok := affected[dependency]; ok {
+				affected[node.key] = struct{}{}
+				result = append(result, node.key)
+				break
+			}
+		}
+	}
+	return result, found
 }
 
 func safeBuildInput(node *nodeDefinition, initial json.RawMessage, outputs map[string]json.RawMessage) (input json.RawMessage, err error) {

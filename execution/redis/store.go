@@ -518,6 +518,9 @@ func (s *Store) RestartExecution(ctx context.Context, id uuid.UUID, availableAt 
 		if item.Status == execution.StatusPending || item.Status == execution.StatusRetry || item.Status == execution.StatusRunning {
 			return execution.ErrActive
 		}
+		if item.PipelineRunID != nil {
+			return execution.ErrPipelineExecution
+		}
 		previous := item.Status
 		item.Status, item.Attempt, item.AvailableAt = execution.StatusPending, 0, availableAt.UTC()
 		item.Output, item.LastError, item.StartedAt, item.FinishedAt = nil, "", nil, nil
@@ -537,19 +540,145 @@ func (s *Store) RestartExecution(ctx context.Context, id uuid.UUID, availableAt 
 			pipe.ZRem(ctx, s.leasesKey(), id.String())
 			pipe.ZAdd(ctx, s.queueKey(item.TaskName), redislib.Z{Score: score(item.AvailableAt), Member: id.String()})
 			pipe.RPush(ctx, s.eventsKey(id), event)
-			if item.PipelineRunID != nil {
-				pipe.HSet(ctx, s.pipelineKey(*item.PipelineRunID), "status", string(execution.RunRunning), "error", "", "updated_at", now.Format(time.RFC3339Nano), "finished_at", "")
-				pipe.ZRem(ctx, s.runStatusKey(execution.RunSucceeded), item.PipelineRunID.String())
-				pipe.ZRem(ctx, s.runStatusKey(execution.RunFailed), item.PipelineRunID.String())
-				pipe.ZRem(ctx, s.runStatusKey(execution.RunCancelled), item.PipelineRunID.String())
-				pipe.ZAdd(ctx, s.runStatusKey(execution.RunRunning), redislib.Z{Score: score(now), Member: item.PipelineRunID.String()})
-			}
 			return nil
 		})
 		result = item
 		return getErr
 	})
 	return result, err
+}
+
+func (s *Store) RestartPipelineSubgraph(ctx context.Context, request execution.RestartSubgraph) (execution.Execution, error) {
+	now, err := s.now(ctx)
+	if err != nil {
+		return execution.Execution{}, err
+	}
+	if request.AvailableAt.IsZero() {
+		request.AvailableAt = now
+	}
+	nodeKeys := append([]string{request.RootNodeKey}, request.DescendantKeys...)
+	ids := make([]uuid.UUID, 0, len(nodeKeys))
+	watchKeys := []string{s.pipelineKey(request.RunID)}
+	for _, nodeKey := range nodeKeys {
+		value, getErr := s.client.Get(ctx, s.nodeKey(request.RunID, nodeKey)).Result()
+		if errors.Is(getErr, redislib.Nil) {
+			continue
+		}
+		if getErr != nil {
+			return execution.Execution{}, getErr
+		}
+		id, parseErr := uuid.Parse(value)
+		if parseErr != nil {
+			return execution.Execution{}, parseErr
+		}
+		ids = append(ids, id)
+		watchKeys = append(watchKeys, s.executionKey(id))
+	}
+	var root execution.Execution
+	err = s.watch(ctx, watchKeys, func(tx *redislib.Tx) error {
+		runValues, getErr := tx.HGetAll(ctx, s.pipelineKey(request.RunID)).Result()
+		if getErr != nil {
+			return getErr
+		}
+		if len(runValues) == 0 {
+			return execution.ErrNotFound
+		}
+		run, getErr := decodeRun(runValues)
+		if getErr != nil {
+			return getErr
+		}
+		items := make([]execution.Execution, 0, len(ids))
+		for _, id := range ids {
+			item, itemErr := s.getExecutionTx(ctx, tx, id)
+			if itemErr != nil {
+				return itemErr
+			}
+			if item.Status == execution.StatusPending || item.Status == execution.StatusRetry || item.Status == execution.StatusRunning {
+				return execution.ErrActive
+			}
+			items = append(items, item)
+		}
+		foundRoot := false
+		previousRunStatus := run.Status
+		run.Status, run.Error, run.UpdatedAt, run.FinishedAt = execution.RunRunning, "", now, nil
+		_, getErr = tx.TxPipelined(ctx, func(pipe redislib.Pipeliner) error {
+			for index := range items {
+				item := &items[index]
+				previous := item.Status
+				if item.NodeKey == request.RootNodeKey {
+					item.Status = execution.StatusPending
+					foundRoot = true
+				} else {
+					item.Status = execution.StatusBlocked
+				}
+				item.Attempt, item.AvailableAt = 0, request.AvailableAt.UTC()
+				item.Output, item.LastError, item.StartedAt, item.FinishedAt = nil, "", nil, nil
+				clearLease(item)
+				if item.NodeKey == request.RootNodeKey {
+					root = *item
+				}
+				encoded, encodeErr := json.Marshal(item)
+				if encodeErr != nil {
+					return encodeErr
+				}
+				event, encodeErr := encodeEvent(*item, execution.EventRestarted, "", now)
+				if encodeErr != nil {
+					return encodeErr
+				}
+				pipe.Set(ctx, s.executionKey(item.ID), encoded, 0)
+				pipe.ZRem(ctx, s.statusKey(previous), item.ID.String())
+				pipe.ZAdd(ctx, s.statusKey(item.Status), redislib.Z{Score: score(item.CreatedAt), Member: item.ID.String()})
+				pipe.ZRem(ctx, s.leasesKey(), item.ID.String())
+				if item.Status == execution.StatusPending {
+					pipe.ZAdd(ctx, s.queueKey(item.TaskName), redislib.Z{Score: score(item.AvailableAt), Member: item.ID.String()})
+				} else {
+					pipe.ZRem(ctx, s.queueKey(item.TaskName), item.ID.String())
+				}
+				pipe.RPush(ctx, s.eventsKey(item.ID), event)
+			}
+			if !foundRoot {
+				return execution.ErrNotFound
+			}
+			pipe.HSet(ctx, s.pipelineKey(run.ID), encodeRun(run))
+			pipe.ZRem(ctx, s.runStatusKey(previousRunStatus), run.ID.String())
+			pipe.ZAdd(ctx, s.runStatusKey(run.Status), redislib.Z{Score: score(run.CreatedAt), Member: run.ID.String()})
+			return nil
+		})
+		return getErr
+	})
+	return root, err
+}
+
+func (s *Store) ReleaseExecution(ctx context.Context, id uuid.UUID, input json.RawMessage, availableAt time.Time) error {
+	now, err := s.now(ctx)
+	if err != nil {
+		return err
+	}
+	if availableAt.IsZero() {
+		availableAt = now
+	}
+	return s.watch(ctx, []string{s.executionKey(id)}, func(tx *redislib.Tx) error {
+		item, getErr := s.getExecutionTx(ctx, tx, id)
+		if getErr != nil {
+			return getErr
+		}
+		if item.Status != execution.StatusBlocked {
+			return execution.ErrActive
+		}
+		item.Status, item.Input, item.AvailableAt = execution.StatusPending, cloneJSON(input), availableAt.UTC()
+		encoded, getErr := json.Marshal(item)
+		if getErr != nil {
+			return getErr
+		}
+		_, getErr = tx.TxPipelined(ctx, func(pipe redislib.Pipeliner) error {
+			pipe.Set(ctx, s.executionKey(id), encoded, 0)
+			pipe.ZRem(ctx, s.statusKey(execution.StatusBlocked), id.String())
+			pipe.ZAdd(ctx, s.statusKey(execution.StatusPending), redislib.Z{Score: score(item.CreatedAt), Member: id.String()})
+			pipe.ZAdd(ctx, s.queueKey(item.TaskName), redislib.Z{Score: score(item.AvailableAt), Member: id.String()})
+			return nil
+		})
+		return getErr
+	})
 }
 
 // Events returns the append-only transition history in insertion order.

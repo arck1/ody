@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS task_executions (
     task_version INT NOT NULL,
     input JSONB NOT NULL,
     output JSONB,
-    status TEXT NOT NULL CHECK (status IN ('pending','running','retry','succeeded','failed','cancelled')),
+    status TEXT NOT NULL CHECK (status IN ('pending','blocked','running','retry','succeeded','failed','cancelled')),
     attempt INT NOT NULL DEFAULT 0,
     max_attempts INT NOT NULL CHECK (max_attempts > 0),
     available_at TIMESTAMPTZ NOT NULL,
@@ -57,3 +57,8 @@ CREATE TABLE IF NOT EXISTS execution_events (
 
 CREATE INDEX IF NOT EXISTS execution_events_execution_idx
     ON execution_events(execution_id, created_at);
+
+-- Existing installations may still have the pre-pipeline-restart status constraint.
+ALTER TABLE task_executions DROP CONSTRAINT IF EXISTS task_executions_status_check;
+ALTER TABLE task_executions ADD CONSTRAINT task_executions_status_check
+    CHECK (status IN ('pending','blocked','running','retry','succeeded','failed','cancelled'));

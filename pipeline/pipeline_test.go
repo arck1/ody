@@ -142,6 +142,59 @@ func TestCancelPipelineInvalidatesPendingNodes(t *testing.T) {
 	}
 }
 
+func TestRestartExecutionRebuildsPipelineDescendants(t *testing.T) {
+	var source atomic.Int32
+	source.Store(2)
+	firstTask := task.New[int, int]("restart.first")
+	secondTask := task.New[int, int]("restart.second")
+	module, _ := task.NewModule("restart",
+		task.Handle(firstTask, func(context.Context, task.Message[int]) (int, error) {
+			return int(source.Load()), nil
+		}),
+		task.Handle(secondTask, func(_ context.Context, message task.Message[int]) (int, error) {
+			return message.Input * 10, nil
+		}),
+	)
+	tasks, _ := task.NewRegistry(module)
+	flow := New[int]("restart-flow", 1)
+	first := Start(flow, "first", firstTask, func(value int) int { return value })
+	second := Then(flow, first, "second", secondTask, func(value int) int { return value })
+	pipelines, _ := NewRegistry(flow)
+	store := execution.NewMemoryStore()
+	engine, _ := NewEngine(store, pipelines)
+	run, err := Run(context.Background(), engine, flow, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, _ := worker.New(store, tasks, engine, nil, worker.Options{PollInterval: time.Millisecond, LeaseDuration: time.Second})
+	runWorkerUntil(t, runner, func() bool {
+		current, getErr := store.GetPipelineRun(context.Background(), run.ID)
+		return getErr == nil && current.Status == execution.RunSucceeded
+	})
+	items, _ := store.ListRunExecutions(context.Background(), run.ID)
+	rootID := items[0].ID
+
+	source.Store(3)
+	if _, err = engine.RestartExecution(context.Background(), rootID); err != nil {
+		t.Fatal(err)
+	}
+	items, _ = store.ListRunExecutions(context.Background(), run.ID)
+	if items[0].Status != execution.StatusPending || items[1].Status != execution.StatusBlocked {
+		t.Fatalf("restart states = %s -> %s", items[0].Status, items[1].Status)
+	}
+	runWorkerUntil(t, runner, func() bool {
+		current, getErr := store.GetPipelineRun(context.Background(), run.ID)
+		return getErr == nil && current.Status == execution.RunSucceeded
+	})
+	value, err := Output(context.Background(), store, run.ID, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value != 30 {
+		t.Fatalf("rebuilt output = %d, want 30", value)
+	}
+}
+
 type assertError string
 
 func (e assertError) Error() string { return string(e) }
@@ -156,4 +209,17 @@ func eventually(t *testing.T, timeout time.Duration, condition func() bool) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatal("condition not met")
+}
+
+func runWorkerUntil(t *testing.T, runner *worker.Worker, condition func() bool) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		_ = runner.Run(ctx)
+		close(done)
+	}()
+	eventually(t, 2*time.Second, condition)
+	cancel()
+	<-done
 }

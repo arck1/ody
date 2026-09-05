@@ -56,7 +56,7 @@ func (s *ServiceSuite) TestInspectAndRestartCompletedTask() {
 	s.ErrorIs(err, execution.ErrActive)
 }
 
-func (s *ServiceSuite) TestRestartReopensPipeline() {
+func (s *ServiceSuite) TestPipelineRestartRequiresCoordinator() {
 	run, err := s.store.CreatePipelineRun(s.ctx, execution.CreatePipelineRun{PipelineName: "import"})
 	s.Require().NoError(err)
 	created, err := s.store.CreateExecution(s.ctx, execution.CreateExecution{TaskName: "fetch", PipelineRunID: &run.ID, NodeKey: "fetch"})
@@ -67,11 +67,10 @@ func (s *ServiceSuite) TestRestartReopensPipeline() {
 	s.Require().NoError(s.store.SetPipelineRunStatus(s.ctx, run.ID, execution.RunFailed, "node fetch"))
 
 	_, err = s.service.RestartTask(s.ctx, created.ID)
-	s.Require().NoError(err)
+	s.ErrorIs(err, execution.ErrPipelineExecution)
 	details, err := s.service.Pipeline(s.ctx, run.ID)
 	s.Require().NoError(err)
-	s.Equal(execution.RunRunning, details.Run.Status)
-	s.Empty(details.Run.Error)
+	s.Equal(execution.RunFailed, details.Run.Status)
 	s.Require().Len(details.Executions, 1)
-	s.Equal(execution.StatusPending, details.Executions[0].Status)
+	s.Equal(execution.StatusFailed, details.Executions[0].Status)
 }

@@ -338,15 +338,19 @@ func (s *Store) RestartExecution(ctx context.Context, id uuid.UUID, availableAt 
 	item, err := scanExecution(tx.QueryRowContext(ctx, `UPDATE task_executions SET
         status='pending',attempt=0,available_at=$2,output=NULL,last_error='',started_at=NULL,finished_at=NULL,
         lease_owner='',lease_token=NULL,lease_until=NULL
-        WHERE id=$1 AND status IN ('succeeded','failed','cancelled') RETURNING `+executionColumns, id, availableAt))
+        WHERE id=$1 AND pipeline_run_id IS NULL AND status IN ('succeeded','failed','cancelled') RETURNING `+executionColumns, id, availableAt))
 	if errors.Is(err, sql.ErrNoRows) {
 		var status execution.Status
-		lookupErr := tx.QueryRowContext(ctx, `SELECT status FROM task_executions WHERE id=$1`, id).Scan(&status)
+		var pipelineRunID *uuid.UUID
+		lookupErr := tx.QueryRowContext(ctx, `SELECT status,pipeline_run_id FROM task_executions WHERE id=$1`, id).Scan(&status, &pipelineRunID)
 		if errors.Is(lookupErr, sql.ErrNoRows) {
 			return execution.Execution{}, execution.ErrNotFound
 		}
 		if lookupErr != nil {
 			return execution.Execution{}, lookupErr
+		}
+		if pipelineRunID != nil {
+			return execution.Execution{}, execution.ErrPipelineExecution
 		}
 		return execution.Execution{}, execution.ErrActive
 	}
@@ -356,12 +360,117 @@ func (s *Store) RestartExecution(ctx context.Context, id uuid.UUID, availableAt 
 	if err = s.insertEvent(ctx, tx, item, execution.EventRestarted, ""); err != nil {
 		return execution.Execution{}, err
 	}
-	if item.PipelineRunID != nil {
-		if _, err = tx.ExecContext(ctx, `UPDATE pipeline_runs SET status='running',error='',updated_at=now(),finished_at=NULL WHERE id=$1`, item.PipelineRunID); err != nil {
+	return item, tx.Commit()
+}
+
+func (s *Store) RestartPipelineSubgraph(ctx context.Context, request execution.RestartSubgraph) (execution.Execution, error) {
+	if request.AvailableAt.IsZero() {
+		request.AvailableAt = time.Now().UTC()
+	}
+	keys := append([]string{request.RootNodeKey}, request.DescendantKeys...)
+	placeholders := make([]string, len(keys))
+	args := make([]any, 0, len(keys)+2)
+	args = append(args, request.RunID)
+	for index, key := range keys {
+		args = append(args, key)
+		placeholders[index] = fmt.Sprintf("$%d", len(args))
+	}
+	availableParam := len(args) + 1
+	args = append(args, request.AvailableAt)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return execution.Execution{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	query := fmt.Sprintf(`SELECT %s FROM task_executions WHERE pipeline_run_id=$1 AND node_key IN (%s) FOR UPDATE`, executionColumns, strings.Join(placeholders, ","))
+	rows, err := tx.QueryContext(ctx, query, args[:len(args)-1]...)
+	if err != nil {
+		return execution.Execution{}, err
+	}
+	items := make([]execution.Execution, 0, len(keys))
+	for rows.Next() {
+		item, scanErr := scanExecution(rows)
+		if scanErr != nil {
+			_ = rows.Close()
+			return execution.Execution{}, scanErr
+		}
+		if item.Status == execution.StatusPending || item.Status == execution.StatusRetry || item.Status == execution.StatusRunning {
+			_ = rows.Close()
+			return execution.Execution{}, execution.ErrActive
+		}
+		items = append(items, item)
+	}
+	if err = rows.Close(); err != nil {
+		return execution.Execution{}, err
+	}
+	var root execution.Execution
+	foundRoot := false
+	for _, item := range items {
+		if item.NodeKey == request.RootNodeKey {
+			root, foundRoot = item, true
+		}
+	}
+	if !foundRoot {
+		return execution.Execution{}, execution.ErrNotFound
+	}
+	update := fmt.Sprintf(`UPDATE task_executions SET
+		status=CASE WHEN node_key=$2 THEN 'pending' ELSE 'blocked' END,
+		attempt=0,available_at=$%d,output=NULL,last_error='',started_at=NULL,finished_at=NULL,
+		lease_owner='',lease_token=NULL,lease_until=NULL
+		WHERE pipeline_run_id=$1 AND node_key IN (%s) RETURNING %s`, availableParam, strings.Join(placeholders, ","), executionColumns)
+	updatedRows, err := tx.QueryContext(ctx, update, args...)
+	if err != nil {
+		return execution.Execution{}, err
+	}
+	updated := make([]execution.Execution, 0, len(items))
+	for updatedRows.Next() {
+		item, scanErr := scanExecution(updatedRows)
+		if scanErr != nil {
+			_ = updatedRows.Close()
+			return execution.Execution{}, scanErr
+		}
+		updated = append(updated, item)
+		if item.NodeKey == request.RootNodeKey {
+			root = item
+		}
+	}
+	if err = updatedRows.Close(); err != nil {
+		return execution.Execution{}, err
+	}
+	for _, item := range updated {
+		if err = s.insertEvent(ctx, tx, item, execution.EventRestarted, ""); err != nil {
 			return execution.Execution{}, err
 		}
 	}
-	return item, tx.Commit()
+	result, err := tx.ExecContext(ctx, `UPDATE pipeline_runs SET status='running',error='',updated_at=now(),finished_at=NULL WHERE id=$1`, request.RunID)
+	if err != nil {
+		return execution.Execution{}, err
+	}
+	if affected, affectedErr := result.RowsAffected(); affectedErr != nil || affected == 0 {
+		if affectedErr != nil {
+			return execution.Execution{}, affectedErr
+		}
+		return execution.Execution{}, execution.ErrNotFound
+	}
+	return root, tx.Commit()
+}
+
+func (s *Store) ReleaseExecution(ctx context.Context, id uuid.UUID, input json.RawMessage, availableAt time.Time) error {
+	if availableAt.IsZero() {
+		availableAt = time.Now().UTC()
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE task_executions SET status='pending',input=$2,available_at=$3 WHERE id=$1 AND status='blocked'`, id, []byte(input), availableAt)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return execution.ErrActive
+	}
+	return nil
 }
 
 func (s *Store) Events(ctx context.Context, id uuid.UUID) ([]execution.Event, error) {

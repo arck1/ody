@@ -14,8 +14,22 @@ import (
 
 // Engine starts and advances durable pipeline runs.
 type Engine struct {
-	store    execution.Store
+	store    Persistence
 	registry *Registry
+}
+
+// Persistence is the minimal durable capability required by pipeline coordination.
+type Persistence interface {
+	execution.PipelineRepository
+	CreateExecution(context.Context, execution.CreateExecution) (execution.Execution, error)
+	GetExecution(context.Context, uuid.UUID) (execution.Execution, error)
+	ListRunExecutions(context.Context, uuid.UUID) ([]execution.Execution, error)
+	CancelExecution(context.Context, uuid.UUID, string) error
+	RestartExecution(context.Context, uuid.UUID, time.Time) (execution.Execution, error)
+}
+
+type OutputReader interface {
+	ListRunExecutions(context.Context, uuid.UUID) ([]execution.Execution, error)
 }
 
 type Snapshot struct {
@@ -30,7 +44,7 @@ func WithIdempotencyKey(key string) RunOption {
 	return func(request *execution.CreatePipelineRun) { request.IdempotencyKey = key }
 }
 
-func NewEngine(store execution.Store, registry *Registry) (*Engine, error) {
+func NewEngine(store Persistence, registry *Registry) (*Engine, error) {
 	if store == nil {
 		return nil, errors.New("pipeline store is nil")
 	}
@@ -284,7 +298,7 @@ func (e *Engine) Cancel(ctx context.Context, runID uuid.UUID, reason string) err
 }
 
 // Output decodes one node's stored result.
-func Output[O any](ctx context.Context, store execution.Store, runID uuid.UUID, node Node[O]) (O, error) {
+func Output[O any](ctx context.Context, store OutputReader, runID uuid.UUID, node Node[O]) (O, error) {
 	var zero O
 	executions, err := store.ListRunExecutions(ctx, runID)
 	if err != nil {

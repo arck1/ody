@@ -27,6 +27,8 @@ worker.Options{
     PollInterval:      100 * time.Millisecond,
     LeaseDuration:     60 * time.Second,
     HeartbeatInterval: 20 * time.Second,
+    MaxConsecutiveErrors: 10,
+    ShutdownGracePeriod: 30 * time.Second,
 }
 ```
 
@@ -37,6 +39,8 @@ worker.Options{
 | `PollInterval` | пауза, когда работы нет или claim завершился ошибкой | `100ms` |
 | `LeaseDuration` | время владения claimed execution | `30s` |
 | `HeartbeatInterval` | период продления lease | `LeaseDuration / 3` |
+| `MaxConsecutiveErrors` | остановка после серии инфраструктурных сбоев; `0` означает бесконечный retry | `0` |
+| `ShutdownGracePeriod` | ожидание handlers, которые не завершились после отмены context | `30s` |
 
 `HeartbeatInterval` обязан быть меньше `LeaseDuration`. Lease выбирайте больше обычной сетевой
 задержки и пауз runtime. Timeout задачи и lease — разные вещи: timeout ограничивает handler, lease
@@ -99,6 +103,16 @@ terminal transition. Каждая смена состояния добавляе
 Worker сообщает переходы выполнения через интерфейс `worker.Observer`; конкретный логгер ядру не
 нужен. Для метрик передайте `monitoring/prometheus.Metrics`. Для логирования или tracing можно
 реализовать собственный Observer и объединить несколько наблюдателей на уровне приложения.
+
+Готовый zap adapter изолирован от worker core:
+
+```go
+observer, err := zapobserver.NewSugared(logger.Sugar())
+app, err := schedulor.New(store, schedulor.Observe(observer))
+```
+
+`zapobserver.New` принимает небольшой интерфейс `Infow/Errorw`, поэтому совместим и с другими
+структурированными логгерами без зависимости прикладного кода от zap.
 
 ## Переменные окружения CLI
 

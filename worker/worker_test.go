@@ -127,6 +127,38 @@ func TestRunStopsAfterInfrastructureFailureLimit(t *testing.T) {
 	}
 }
 
+func TestRunWaitsForInFlightHandlerWithinGracePeriod(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	definition := task.New[struct{}, struct{}]("shutdown.task")
+	module, _ := task.NewModule("shutdown", task.Handle(definition, func(context.Context, task.Message[struct{}]) (struct{}, error) {
+		close(started)
+		<-release
+		return struct{}{}, nil
+	}))
+	registry, _ := task.NewRegistry(module)
+	store := execution.NewMemoryStore()
+	_, _ = definition.Enqueue(context.Background(), store, struct{}{})
+	runner, _ := New(store, registry, nil, nil, Options{
+		PollInterval: time.Millisecond, LeaseDuration: time.Second,
+		HeartbeatInterval: 100 * time.Millisecond, ShutdownGracePeriod: time.Second,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runner.Run(ctx) }()
+	<-started
+	cancel()
+	select {
+	case err := <-done:
+		t.Fatalf("worker stopped before handler: %v", err)
+	case <-time.After(10 * time.Millisecond):
+	}
+	close(release)
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run error = %v", err)
+	}
+}
+
 type lostLeaseStore struct{ *execution.MemoryStore }
 
 func (s *lostLeaseStore) Heartbeat(context.Context, uuid.UUID, uuid.UUID, time.Duration) error {

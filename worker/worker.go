@@ -22,6 +22,14 @@ type Advancer interface {
 
 type reconciler interface{ Reconcile(context.Context) error }
 
+// Persistence is the minimal storage capability required by a worker.
+type Persistence interface {
+	execution.Queue
+	GetExecution(context.Context, uuid.UUID) (execution.Execution, error)
+}
+
+var ErrShutdownTimeout = errors.New("worker shutdown grace period elapsed")
+
 type Options struct {
 	// ID is persisted as LeaseOwner and should identify one worker process.
 	ID string
@@ -36,6 +44,9 @@ type Options struct {
 	// MaxConsecutiveErrors stops a polling loop after this many infrastructure failures. Zero keeps
 	// retrying forever while reporting degraded health.
 	MaxConsecutiveErrors int
+	// ShutdownGracePeriod bounds waiting for handlers that ignore cancellation. The lease remains
+	// the recovery boundary when this timeout elapses.
+	ShutdownGracePeriod time.Duration
 }
 
 type Operation string
@@ -74,16 +85,17 @@ type Health struct {
 }
 
 type Worker struct {
-	store    execution.Store
+	store    Persistence
 	registry *task.Registry
 	advancer Advancer
 	observer Observer
 	options  Options
 	healthMu sync.RWMutex
 	health   Health
+	handlers sync.WaitGroup
 }
 
-func New(store execution.Store, registry *task.Registry, advancer Advancer, observer Observer, options Options) (*Worker, error) {
+func New(store Persistence, registry *task.Registry, advancer Advancer, observer Observer, options Options) (*Worker, error) {
 	if store == nil {
 		return nil, errors.New("worker store is nil")
 	}
@@ -108,6 +120,9 @@ func New(store execution.Store, registry *task.Registry, advancer Advancer, obse
 	if options.HeartbeatInterval >= options.LeaseDuration {
 		return nil, errors.New("heartbeat interval must be shorter than lease duration")
 	}
+	if options.ShutdownGracePeriod <= 0 {
+		options.ShutdownGracePeriod = 30 * time.Second
+	}
 	if observer == nil {
 		observer = nopObserver{}
 	}
@@ -130,10 +145,29 @@ func (w *Worker) Run(ctx context.Context) error {
 		})
 	}
 	group.Wait()
+	if !w.waitForHandlers() {
+		return ErrShutdownTimeout
+	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 	return context.Cause(runCtx)
+}
+
+func (w *Worker) waitForHandlers() bool {
+	done := make(chan struct{})
+	go func() {
+		w.handlers.Wait()
+		close(done)
+	}()
+	timer := time.NewTimer(w.options.ShutdownGracePeriod)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
+	}
 }
 
 func (w *Worker) loop(ctx context.Context) error {
@@ -241,7 +275,9 @@ func (w *Worker) execute(workerCtx context.Context, item execution.Execution) {
 	// The buffer lets a late handler finish without blocking while the worker has already resolved a
 	// timeout or shutdown. Go cannot forcibly stop a handler; it must still honor its context.
 	resultCh := make(chan result, 1)
+	w.handlers.Add(1)
 	go func() {
+		defer w.handlers.Done()
 		output, err := w.registry.Execute(handlerCtx, item)
 		resultCh <- result{output: output, err: err}
 	}()

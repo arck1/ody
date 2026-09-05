@@ -395,6 +395,7 @@ func (s *Store) RestartPipelineSubgraph(ctx context.Context, request execution.R
 	if err != nil {
 		return execution.Execution{}, err
 	}
+	defer func() { _ = rows.Close() }()
 	items := make([]execution.Execution, 0, len(keys))
 	for rows.Next() {
 		item, scanErr := scanExecution(rows)
@@ -430,6 +431,7 @@ func (s *Store) RestartPipelineSubgraph(ctx context.Context, request execution.R
 	if err != nil {
 		return execution.Execution{}, err
 	}
+	defer func() { _ = updatedRows.Close() }()
 	updated := make([]execution.Execution, 0, len(items))
 	for updatedRows.Next() {
 		item, scanErr := scanExecution(updatedRows)
@@ -546,6 +548,7 @@ func (s *Store) Purge(ctx context.Context, before time.Time, limit int) (executi
 	if err != nil {
 		return execution.PurgeResult{}, err
 	}
+	defer func() { _ = runRows.Close() }()
 	runIDs := []uuid.UUID{}
 	for runRows.Next() {
 		var id uuid.UUID
@@ -756,19 +759,6 @@ func ownedResult(result sql.Result, err error) error {
 	}
 	if rows == 0 {
 		return execution.ErrLeaseLost
-	}
-	return nil
-}
-func foundResult(result sql.Result, err error) error {
-	if err != nil {
-		return err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows == 0 {
-		return execution.ErrNotFound
 	}
 	return nil
 }

@@ -117,6 +117,8 @@ errors, inputs, and outputs are not.
 - Long-lived components must honor cancellation promptly and close owned resources.
 - Constructors receiving database or Redis clients do not own them; the application closes them.
 - Observability depends on `worker.Observer`, not a concrete logger.
+- `worker/zapobserver` is the optional zap adapter; logger compatibility is expressed through its
+  small `Infow/Errorw` interface.
 
 ## Database changes
 

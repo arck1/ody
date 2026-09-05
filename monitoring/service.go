@@ -46,8 +46,13 @@ type PipelineDetails struct {
 	Executions []execution.Execution `json:"executions"`
 }
 
+type Persistence interface {
+	execution.ExecutionRepository
+	execution.PipelineRepository
+}
+
 type Service struct {
-	store             execution.Store
+	store             Persistence
 	pipelineRestarter PipelineRestarter
 }
 
@@ -63,7 +68,7 @@ func WithPipelineRestarter(restarter PipelineRestarter) Option {
 
 var _ API = (*Service)(nil)
 
-func New(store execution.Store, options ...Option) (*Service, error) {
+func New(store Persistence, options ...Option) (*Service, error) {
 	if store == nil {
 		return nil, errors.New("monitoring store is nil")
 	}

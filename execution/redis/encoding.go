@@ -19,7 +19,8 @@ func encodeRun(run execution.PipelineRun) map[string]any {
 	return map[string]any{
 		"id": run.ID.String(), "pipeline_name": run.PipelineName, "pipeline_version": run.PipelineVersion,
 		"input": string(run.Input), "status": string(run.Status), "error": run.Error,
-		"created_at": run.CreatedAt.UTC().Format(time.RFC3339Nano), "updated_at": run.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		"idempotency_key": run.IdempotencyKey,
+		"created_at":      run.CreatedAt.UTC().Format(time.RFC3339Nano), "updated_at": run.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		"finished_at": finished,
 	}
 }
@@ -44,7 +45,8 @@ func decodeRun(values map[string]string) (execution.PipelineRun, error) {
 	run := execution.PipelineRun{
 		ID: id, PipelineName: values["pipeline_name"], PipelineVersion: version,
 		Input: json.RawMessage(values["input"]), Status: execution.RunStatus(values["status"]), Error: values["error"],
-		CreatedAt: created, UpdatedAt: updated,
+		IdempotencyKey: values["idempotency_key"],
+		CreatedAt:      created, UpdatedAt: updated,
 	}
 	if values["finished_at"] != "" {
 		finished, parseErr := time.Parse(time.RFC3339Nano, values["finished_at"])

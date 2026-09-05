@@ -49,6 +49,8 @@ when a new component does not need the full Store.
   history, idempotency, and pipeline persistence.
 - `pipeline`: typed DAG definition (`Start`, `Then`, `Join2`), registry, durable engine,
   reconciliation, cancellation, inspection, and output decoding.
+- `schedule`: cron definitions for typed tasks and pipelines, timezone, misfire recovery, overlap
+  policy, and durable tick idempotency.
 - `worker`: standalone concurrent worker with polling, timeout, lease heartbeat, retry, result
   persistence, observer callbacks, and pipeline advancement.
 - root `schedulor.App`: common standalone/Fx composition facade over Store, worker, and pipeline.

@@ -23,6 +23,13 @@ type Snapshot struct {
 	Executions []execution.Execution
 }
 
+type RunOption func(*execution.CreatePipelineRun)
+
+// WithIdempotencyKey returns an existing run with the same pipeline name and key.
+func WithIdempotencyKey(key string) RunOption {
+	return func(request *execution.CreatePipelineRun) { request.IdempotencyKey = key }
+}
+
 func NewEngine(store execution.Store, registry *Registry) (*Engine, error) {
 	if store == nil {
 		return nil, errors.New("pipeline store is nil")
@@ -34,7 +41,7 @@ func NewEngine(store execution.Store, registry *Registry) (*Engine, error) {
 }
 
 // Run persists a pipeline invocation and schedules its root nodes.
-func Run[I any](ctx context.Context, engine *Engine, definition *Definition[I], input I) (execution.PipelineRun, error) {
+func Run[I any](ctx context.Context, engine *Engine, definition *Definition[I], input I, options ...RunOption) (execution.PipelineRun, error) {
 	if engine == nil {
 		return execution.PipelineRun{}, errors.New("pipeline engine is nil")
 	}
@@ -48,7 +55,13 @@ func Run[I any](ctx context.Context, engine *Engine, definition *Definition[I], 
 	if err != nil {
 		return execution.PipelineRun{}, fmt.Errorf("encode pipeline input: %w", err)
 	}
-	run, err := engine.store.CreatePipelineRun(ctx, execution.CreatePipelineRun{PipelineName: definition.name, PipelineVersion: definition.version, Input: raw})
+	request := execution.CreatePipelineRun{PipelineName: definition.name, PipelineVersion: definition.version, Input: raw}
+	for _, option := range options {
+		if option != nil {
+			option(&request)
+		}
+	}
+	run, err := engine.store.CreatePipelineRun(ctx, request)
 	if err != nil {
 		return execution.PipelineRun{}, err
 	}

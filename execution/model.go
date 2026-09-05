@@ -113,6 +113,7 @@ type PipelineRun struct {
 	Input           json.RawMessage `json:"input"`
 	Status          RunStatus       `json:"status"`
 	Error           string          `json:"error,omitempty"`
+	IdempotencyKey  string          `json:"idempotency_key,omitempty"`
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
 	FinishedAt      *time.Time      `json:"finished_at,omitempty"`
@@ -122,6 +123,7 @@ type CreatePipelineRun struct {
 	PipelineName    string
 	PipelineVersion int
 	Input           json.RawMessage
+	IdempotencyKey  string
 }
 
 // RestartSubgraph describes a pipeline restart compiled from the registered DAG. RootNodeKey is

@@ -41,6 +41,9 @@ func (s *Store) runExecutionsKey(id uuid.UUID) string {
 
 func (s *Store) pipelineKey(id uuid.UUID) string { return s.prefix + "pipeline:" + id.String() }
 func (s *Store) runsKey() string                 { return s.prefix + "pipelines" }
+func (s *Store) pipelineIdempotencyKey(name, key string) string {
+	return s.prefix + "pipeline-idempotency:" + encodeKey(name+"\x00"+key)
+}
 
 func (s *Store) runStatusKey(status execution.RunStatus) string {
 	return s.prefix + "pipeline-status:" + string(status)

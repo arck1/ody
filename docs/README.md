@@ -9,7 +9,8 @@ Schedulor — Go-библиотека для фоновых задач, повт
 2. [Конфигурация](configuration.md) — Store, worker, retry, lease, observer и окружение.
 3. [Generic-задачи](tasks.md) — определения, handlers, модули, версии и постановка в очередь.
 4. [Пайплайны](pipelines.md) — последовательности, fan-out/fan-in, результаты и восстановление.
-5. [Запуск и эксплуатация](operations.md) — standalone, Fx, monitoring, Prometheus, CLI и web UI.
+5. [Cron-расписания](scheduling.md) — timezone, misfire, overlap и durable idempotency ticks.
+6. [Запуск и эксплуатация](operations.md) — standalone, Fx, monitoring, Prometheus, CLI и web UI.
 
 Основной API библиотеки — `task` + `execution.Store` + `worker` + `pipeline`. Он сохраняет активные
 и завершённые выполнения, события, входы и результаты.

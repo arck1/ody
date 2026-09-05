@@ -9,6 +9,7 @@ Schedulor — модульная Go-библиотека для типизиро
 - generic-задачи `task.Definition[Input, Output]` и типизированные handlers;
 - конкурентный worker с timeout, retry, heartbeat и at-least-once выполнением;
 - persistent pipeline с `Start`, `Then`, fan-out и `Join2`;
+- cron scheduler для typed tasks и pipelines с timezone, misfire и overlap policy;
 - standalone-запуск и опциональная интеграция с Uber Fx;
 - просмотр, отмена и перезапуск выполнений через Go API, CLI и web UI;
 - Prometheus-метрики и функциональные тесты с настоящими PostgreSQL и Redis.
@@ -47,6 +48,7 @@ Store в worker, pipeline engine и monitoring service. PostgreSQL требуе�
 - [Конфигурация](docs/configuration.md)
 - [Generic-задачи](docs/tasks.md)
 - [Пайплайны](docs/pipelines.md)
+- [Cron-расписания](docs/scheduling.md)
 - [Запуск, Fx, CLI, web UI и метрики](docs/operations.md)
 - [Архитектура для агентов](AGENTS.md)
 

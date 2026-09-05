@@ -5,11 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/google/uuid"
 
 	"schedulor/execution"
 	"schedulor/pipeline"
+	"schedulor/schedule"
 	"schedulor/task"
 	"schedulor/worker"
 )
@@ -21,6 +23,8 @@ type configuration struct {
 	pipelines []pipeline.RegisteredDefinition
 	observer  worker.Observer
 	worker    worker.Options
+	schedules []schedule.Definition
+	scheduler schedule.Options
 }
 
 // Tasks registers application task modules in the runtime.
@@ -43,12 +47,22 @@ func WithWorker(options worker.Options) Option {
 	return func(config *configuration) { config.worker = options }
 }
 
+// Schedules registers cron triggers that enqueue through the same durable Store.
+func Schedules(definitions ...schedule.Definition) Option {
+	return func(config *configuration) { config.schedules = append(config.schedules, definitions...) }
+}
+
+func WithScheduler(options schedule.Options) Option {
+	return func(config *configuration) { config.scheduler = options }
+}
+
 // App is the common standalone and Fx runtime. It is also a task.ExecutionCreator, so typed task
 // definitions can enqueue directly through it.
 type App struct {
 	store     execution.Store
 	worker    *worker.Worker
 	pipelines *pipeline.Engine
+	scheduler *schedule.Scheduler
 }
 
 func New(store execution.Store, options ...Option) (*App, error) {
@@ -77,14 +91,32 @@ func New(store execution.Store, options ...Option) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &App{store: store, worker: runner, pipelines: engine}, nil
+	scheduler, err := schedule.New(store, engine, config.schedules, config.scheduler)
+	if err != nil {
+		return nil, err
+	}
+	return &App{store: store, worker: runner, pipelines: engine, scheduler: scheduler}, nil
 }
 
 func (a *App) Run(ctx context.Context) error {
 	if a == nil || a.worker == nil {
 		return errors.New("schedulor app is nil")
 	}
-	return a.worker.Run(ctx)
+	runCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	var group sync.WaitGroup
+	for _, component := range []interface{ Run(context.Context) error }{a.worker, a.scheduler} {
+		group.Go(func() {
+			if err := component.Run(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+				cancel(err)
+			}
+		})
+	}
+	group.Wait()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return context.Cause(runCtx)
 }
 
 func (a *App) CreateExecution(ctx context.Context, request execution.CreateExecution) (execution.Execution, error) {

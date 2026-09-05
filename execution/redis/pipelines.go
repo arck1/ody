@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"errors"
 	"sort"
 
 	"github.com/google/uuid"
@@ -18,15 +19,43 @@ func (s *Store) CreatePipelineRun(ctx context.Context, request execution.CreateP
 	}
 	run := execution.PipelineRun{
 		ID: uuid.New(), PipelineName: request.PipelineName, PipelineVersion: request.PipelineVersion,
-		Input: cloneJSON(request.Input), Status: execution.RunPending, CreatedAt: now, UpdatedAt: now,
+		Input: cloneJSON(request.Input), Status: execution.RunPending, IdempotencyKey: request.IdempotencyKey,
+		CreatedAt: now, UpdatedAt: now,
 	}
-	_, err = s.client.TxPipelined(ctx, func(pipe redislib.Pipeliner) error {
-		pipe.HSet(ctx, s.pipelineKey(run.ID), encodeRun(run))
-		pipe.HIncrBy(ctx, s.pipelineCountsKey(), countField(run.PipelineName, string(run.Status)), 1)
-		pipe.ZAdd(ctx, s.runsKey(), redislib.Z{Score: score(now), Member: run.ID.String()})
-		pipe.ZAdd(ctx, s.runStatusKey(run.Status), redislib.Z{Score: score(now), Member: run.ID.String()})
-		return nil
+	watchKeys := []string{}
+	if run.IdempotencyKey != "" {
+		watchKeys = append(watchKeys, s.pipelineIdempotencyKey(run.PipelineName, run.IdempotencyKey))
+	}
+	var existing uuid.UUID
+	err = s.watch(ctx, watchKeys, func(tx *redislib.Tx) error {
+		if len(watchKeys) > 0 {
+			value, getErr := tx.Get(ctx, watchKeys[0]).Result()
+			if getErr == nil {
+				existing, getErr = uuid.Parse(value)
+				if getErr != nil {
+					return getErr
+				}
+				return errExisting
+			}
+			if !errors.Is(getErr, redislib.Nil) {
+				return getErr
+			}
+		}
+		_, getErr := tx.TxPipelined(ctx, func(pipe redislib.Pipeliner) error {
+			pipe.HSet(ctx, s.pipelineKey(run.ID), encodeRun(run))
+			pipe.HIncrBy(ctx, s.pipelineCountsKey(), countField(run.PipelineName, string(run.Status)), 1)
+			pipe.ZAdd(ctx, s.runsKey(), redislib.Z{Score: score(now), Member: run.ID.String()})
+			pipe.ZAdd(ctx, s.runStatusKey(run.Status), redislib.Z{Score: score(now), Member: run.ID.String()})
+			if len(watchKeys) > 0 {
+				pipe.Set(ctx, watchKeys[0], run.ID.String(), 0)
+			}
+			return nil
+		})
+		return getErr
 	})
+	if errors.Is(err, errExisting) {
+		return s.GetPipelineRun(ctx, existing)
+	}
 	return run, err
 }
 

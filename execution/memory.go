@@ -13,23 +13,25 @@ import (
 
 // MemoryStore is a concurrency-safe reference Store for tests and local processes.
 type MemoryStore struct {
-	mu         sync.Mutex
-	executions map[uuid.UUID]Execution
-	runs       map[uuid.UUID]PipelineRun
-	events     map[uuid.UUID][]Event
-	idempotent map[string]uuid.UUID
-	nodes      map[string]uuid.UUID
-	now        func() time.Time
+	mu            sync.Mutex
+	executions    map[uuid.UUID]Execution
+	runs          map[uuid.UUID]PipelineRun
+	events        map[uuid.UUID][]Event
+	idempotent    map[string]uuid.UUID
+	nodes         map[string]uuid.UUID
+	runIdempotent map[string]uuid.UUID
+	now           func() time.Time
 }
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		executions: make(map[uuid.UUID]Execution),
-		runs:       make(map[uuid.UUID]PipelineRun),
-		events:     make(map[uuid.UUID][]Event),
-		idempotent: make(map[string]uuid.UUID),
-		nodes:      make(map[string]uuid.UUID),
-		now:        func() time.Time { return time.Now().UTC() },
+		executions:    make(map[uuid.UUID]Execution),
+		runs:          make(map[uuid.UUID]PipelineRun),
+		events:        make(map[uuid.UUID][]Event),
+		idempotent:    make(map[string]uuid.UUID),
+		nodes:         make(map[string]uuid.UUID),
+		runIdempotent: make(map[string]uuid.UUID),
+		now:           func() time.Time { return time.Now().UTC() },
 	}
 }
 
@@ -425,6 +427,12 @@ func (s *MemoryStore) Events(_ context.Context, id uuid.UUID) ([]Event, error) {
 func (s *MemoryStore) CreatePipelineRun(_ context.Context, request CreatePipelineRun) (PipelineRun, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if request.IdempotencyKey != "" {
+		key := request.PipelineName + "\x00" + request.IdempotencyKey
+		if id, ok := s.runIdempotent[key]; ok {
+			return cloneRun(s.runs[id]), nil
+		}
+	}
 	now := s.now()
 	run := PipelineRun{
 		ID:              uuid.New(),
@@ -432,10 +440,14 @@ func (s *MemoryStore) CreatePipelineRun(_ context.Context, request CreatePipelin
 		PipelineVersion: request.PipelineVersion,
 		Input:           cloneJSON(request.Input),
 		Status:          RunPending,
+		IdempotencyKey:  request.IdempotencyKey,
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
 	s.runs[run.ID] = run
+	if request.IdempotencyKey != "" {
+		s.runIdempotent[request.PipelineName+"\x00"+request.IdempotencyKey] = run.ID
+	}
 	return cloneRun(run), nil
 }
 

@@ -7,7 +7,7 @@ import (
 	prom "github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 
-	"ody/execution"
+	"github.com/arck1/ody/execution"
 )
 
 func TestMetricsExposeTransitionsAndStoreState(t *testing.T) {

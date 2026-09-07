@@ -9,8 +9,8 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"ody/execution"
-	"ody/monitoring"
+	"github.com/arck1/ody/execution"
+	"github.com/arck1/ody/monitoring"
 )
 
 type HandlerSuite struct {

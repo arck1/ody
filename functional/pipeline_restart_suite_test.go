@@ -7,11 +7,11 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"ody"
-	"ody/execution"
-	"ody/monitoring"
-	"ody/pipeline"
-	"ody/task"
+	"github.com/arck1/ody"
+	"github.com/arck1/ody/execution"
+	"github.com/arck1/ody/monitoring"
+	"github.com/arck1/ody/pipeline"
+	"github.com/arck1/ody/task"
 )
 
 type PipelineRestartSuite struct{ suite.Suite }

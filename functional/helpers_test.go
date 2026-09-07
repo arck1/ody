@@ -9,8 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"ody/execution"
-	"ody/worker"
+	"github.com/arck1/ody/execution"
+	"github.com/arck1/ody/worker"
 )
 
 func fastWorkerOptions() worker.Options {

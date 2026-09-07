@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"ody/execution"
+	"github.com/arck1/ody/execution"
 )
 
 var ErrEmptyName = errors.New("task name is empty")

@@ -5,17 +5,23 @@
 
 ## 0. Подключите модуль
 
-Текущий module path проекта — `ody`. Для локального приложения рядом с checkout:
+Канонический module path проекта — `github.com/arck1/ody`:
 
 ```bash
-go mod edit -require=ody@v0.0.0
-go mod edit -replace=ody=../ody
+go get github.com/arck1/ody@latest
+```
+
+Для локального приложения рядом с checkout можно временно подменить модуль:
+
+```bash
+go mod edit -require=github.com/arck1/ody@v0.0.0
+go mod edit -replace=github.com/arck1/ody=../ody
 go mod tidy
 ```
 
-После публикации библиотеки замените module path и imports на адрес репозитория с выбранной
-semantic version. В примерах используются imports `ody/task`, `ody/execution`,
-`ody/execution/postgres`, `ody/pipeline` и `ody/worker`.
+В примерах используются imports `github.com/arck1/ody/task`,
+`github.com/arck1/ody/execution`, `github.com/arck1/ody/execution/postgres`,
+`github.com/arck1/ody/pipeline` и `github.com/arck1/ody/worker`.
 
 Нужны версия Go из `go.mod` и PostgreSQL либо Redis для durable production Store.
 `execution.MemoryStore` подходит для тестов и локальных однопроцессных сценариев.

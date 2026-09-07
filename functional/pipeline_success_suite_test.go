@@ -7,10 +7,10 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"ody/execution"
-	"ody/pipeline"
-	"ody/task"
-	"ody/worker"
+	"github.com/arck1/ody/execution"
+	"github.com/arck1/ody/pipeline"
+	"github.com/arck1/ody/task"
+	"github.com/arck1/ody/worker"
 )
 
 type PipelineSuccessSuite struct{ suite.Suite }

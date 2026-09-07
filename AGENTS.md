@@ -9,7 +9,7 @@ Ody is a Go library for durable, typed background jobs and persistent DAG pipeli
 supports standalone construction and optional Uber Fx lifecycle integration. PostgreSQL and Redis
 are production Stores; the memory Store supports tests and local scenarios.
 
-The module path is `ody`. The required Go version is declared in `go.mod`.
+The module path is `github.com/arck1/ody`. The required Go version is declared in `go.mod`.
 
 ## Architecture
 

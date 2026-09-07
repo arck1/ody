@@ -1,4 +1,4 @@
-module ody
+module github.com/arck1/ody
 
 go 1.26
 

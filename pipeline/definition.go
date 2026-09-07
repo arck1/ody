@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"ody/task"
+	"github.com/arck1/ody/task"
 )
 
 type Definition[Input any] struct {

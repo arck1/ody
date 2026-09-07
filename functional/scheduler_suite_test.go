@@ -7,10 +7,10 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"ody"
-	"ody/execution"
-	"ody/schedule"
-	"ody/task"
+	"github.com/arck1/ody"
+	"github.com/arck1/ody/execution"
+	"github.com/arck1/ody/schedule"
+	"github.com/arck1/ody/task"
 )
 
 type SchedulerSuite struct{ suite.Suite }

@@ -20,12 +20,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	redislib "github.com/redis/go-redis/v9"
 
-	"ody/execution"
-	executionpostgres "ody/execution/postgres"
-	executionredis "ody/execution/redis"
-	"ody/monitoring"
-	"ody/monitoring/httpui"
-	monitoringprom "ody/monitoring/prometheus"
+	"github.com/arck1/ody/execution"
+	executionpostgres "github.com/arck1/ody/execution/postgres"
+	executionredis "github.com/arck1/ody/execution/redis"
+	"github.com/arck1/ody/monitoring"
+	"github.com/arck1/ody/monitoring/httpui"
+	monitoringprom "github.com/arck1/ody/monitoring/prometheus"
 )
 
 func main() {

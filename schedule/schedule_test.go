@@ -7,9 +7,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"ody/execution"
-	"ody/pipeline"
-	"ody/task"
+	"github.com/arck1/ody/execution"
+	"github.com/arck1/ody/pipeline"
+	"github.com/arck1/ody/task"
 )
 
 func TestTaskTickIsDurablyIdempotent(t *testing.T) {

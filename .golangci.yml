@@ -40,7 +40,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - ody
+        - github.com/arck1/ody
 
 issues:
   max-issues-per-linter: 0

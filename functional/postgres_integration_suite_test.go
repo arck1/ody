@@ -13,13 +13,13 @@ import (
 	prom "github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/suite"
 
-	"ody/execution"
-	executionpostgres "ody/execution/postgres"
-	"ody/monitoring"
-	monitoringprom "ody/monitoring/prometheus"
-	"ody/pipeline"
-	"ody/task"
-	"ody/worker"
+	"github.com/arck1/ody/execution"
+	executionpostgres "github.com/arck1/ody/execution/postgres"
+	"github.com/arck1/ody/monitoring"
+	monitoringprom "github.com/arck1/ody/monitoring/prometheus"
+	"github.com/arck1/ody/pipeline"
+	"github.com/arck1/ody/task"
+	"github.com/arck1/ody/worker"
 )
 
 type PostgresInfrastructureSuite struct {

@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	redislib "github.com/redis/go-redis/v9"
 
-	"ody/execution"
+	"github.com/arck1/ody/execution"
 )
 
 // CreatePipelineRun persists a new pending run and its list indexes.

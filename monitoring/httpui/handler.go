@@ -12,8 +12,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"ody/execution"
-	"ody/monitoring"
+	"github.com/arck1/ody/execution"
+	"github.com/arck1/ody/monitoring"
 )
 
 //go:embed index.html

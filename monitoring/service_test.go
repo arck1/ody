@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"ody/execution"
+	"github.com/arck1/ody/execution"
 )
 
 type ServiceSuite struct {

@@ -12,7 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"ody/execution"
+	"github.com/arck1/ody/execution"
 )
 
 //go:embed schema.sql

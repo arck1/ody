@@ -15,7 +15,7 @@ import (
 	postgrescontainer "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	executionpostgres "ody/execution/postgres"
+	executionpostgres "github.com/arck1/ody/execution/postgres"
 )
 
 const (

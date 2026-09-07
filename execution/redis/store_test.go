@@ -10,7 +10,7 @@ import (
 	redislib "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 
-	"ody/execution"
+	"github.com/arck1/ody/execution"
 )
 
 func newTestStore(t *testing.T) (*Store, func()) {

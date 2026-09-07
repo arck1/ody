@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"ody/execution"
-	"ody/task"
-	"ody/worker"
+	"github.com/arck1/ody/execution"
+	"github.com/arck1/ody/task"
+	"github.com/arck1/ody/worker"
 )
 
 type flowInput struct {

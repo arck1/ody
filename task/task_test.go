@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"ody/execution"
+	"github.com/arck1/ody/execution"
 )
 
 func TestTypedTaskPersistsInputAndOutput(t *testing.T) {

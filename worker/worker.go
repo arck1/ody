@@ -11,8 +11,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"ody/execution"
-	"ody/task"
+	"github.com/arck1/ody/execution"
+	"github.com/arck1/ody/task"
 )
 
 type Advancer interface {

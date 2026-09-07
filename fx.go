@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/fx"
 
-	"ody/execution"
+	"github.com/arck1/ody/execution"
 )
 
 // FxModule constructs the same App used by standalone applications and attaches it to Fx's

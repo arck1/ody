@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/fx"
 
-	"ody"
-	"ody/execution"
-	"ody/task"
+	"github.com/arck1/ody"
+	"github.com/arck1/ody/execution"
+	"github.com/arck1/ody/task"
 )
 
 type FxLifecycleSuite struct{ suite.Suite }

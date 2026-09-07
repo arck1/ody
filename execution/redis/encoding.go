@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"ody/execution"
+	"github.com/arck1/ody/execution"
 )
 
 // Pipeline runs use hashes so status changes do not require rewriting the potentially large input.

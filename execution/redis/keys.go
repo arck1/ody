@@ -5,7 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"ody/execution"
+	"github.com/arck1/ody/execution"
 )
 
 // User-controlled names are encoded so separators in task/node/idempotency values cannot collide

@@ -8,8 +8,8 @@ import (
 
 	prom "github.com/prometheus/client_golang/prometheus"
 
-	"ody/execution"
-	"ody/worker"
+	"github.com/arck1/ody/execution"
+	"github.com/arck1/ody/worker"
 )
 
 type Metrics struct {

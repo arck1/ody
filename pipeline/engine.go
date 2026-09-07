@@ -1,0 +1,319 @@
+package pipeline
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+
+	"schedulor/execution"
+)
+
+// Engine starts and advances durable pipeline runs.
+type Engine struct {
+	store    Persistence
+	registry *Registry
+}
+
+// Persistence is the minimal durable capability required by pipeline coordination.
+type Persistence interface {
+	execution.PipelineRepository
+	CreateExecution(context.Context, execution.CreateExecution) (execution.Execution, error)
+	GetExecution(context.Context, uuid.UUID) (execution.Execution, error)
+	ListRunExecutions(context.Context, uuid.UUID) ([]execution.Execution, error)
+	CancelExecution(context.Context, uuid.UUID, string) error
+	RestartExecution(context.Context, uuid.UUID, time.Time) (execution.Execution, error)
+}
+
+type OutputReader interface {
+	ListRunExecutions(context.Context, uuid.UUID) ([]execution.Execution, error)
+}
+
+type Snapshot struct {
+	Run        execution.PipelineRun
+	Executions []execution.Execution
+}
+
+type RunOption func(*execution.CreatePipelineRun)
+
+// WithIdempotencyKey returns an existing run with the same pipeline name and key.
+func WithIdempotencyKey(key string) RunOption {
+	return func(request *execution.CreatePipelineRun) { request.IdempotencyKey = key }
+}
+
+func NewEngine(store Persistence, registry *Registry) (*Engine, error) {
+	if store == nil {
+		return nil, errors.New("pipeline store is nil")
+	}
+	if registry == nil {
+		return nil, errors.New("pipeline registry is nil")
+	}
+	return &Engine{store: store, registry: registry}, nil
+}
+
+// Run persists a pipeline invocation and schedules its root nodes.
+func Run[I any](ctx context.Context, engine *Engine, definition *Definition[I], input I, options ...RunOption) (execution.PipelineRun, error) {
+	if engine == nil {
+		return execution.PipelineRun{}, errors.New("pipeline engine is nil")
+	}
+	if err := definition.validate(); err != nil {
+		return execution.PipelineRun{}, err
+	}
+	if _, ok := engine.registry.definitions[registryKey(definition.name, definition.version)]; !ok {
+		return execution.PipelineRun{}, fmt.Errorf("pipeline definition %s is not registered", registryKey(definition.name, definition.version))
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return execution.PipelineRun{}, fmt.Errorf("encode pipeline input: %w", err)
+	}
+	request := execution.CreatePipelineRun{PipelineName: definition.name, PipelineVersion: definition.version, Input: raw}
+	for _, option := range options {
+		if option != nil {
+			option(&request)
+		}
+	}
+	run, err := engine.store.CreatePipelineRun(ctx, request)
+	if err != nil {
+		return execution.PipelineRun{}, err
+	}
+	if err = engine.Advance(ctx, run.ID); err != nil {
+		return execution.PipelineRun{}, err
+	}
+	return engine.store.GetPipelineRun(ctx, run.ID)
+}
+
+// Advance idempotently schedules ready nodes and updates terminal run state.
+func (e *Engine) Advance(ctx context.Context, runID uuid.UUID) error {
+	for range 4 {
+		err := e.advanceOnce(ctx, runID)
+		if !errors.Is(err, execution.ErrConflict) {
+			return err
+		}
+	}
+	return fmt.Errorf("advance pipeline %s: %w", runID, execution.ErrConflict)
+}
+
+func (e *Engine) advanceOnce(ctx context.Context, runID uuid.UUID) error {
+	run, err := e.store.GetPipelineRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if run.Status == execution.RunSucceeded || run.Status == execution.RunFailed || run.Status == execution.RunCancelled {
+		return nil
+	}
+	definition, ok := e.registry.definitions[registryKey(run.PipelineName, run.PipelineVersion)]
+	if !ok {
+		return fmt.Errorf("pipeline definition %s is not registered", registryKey(run.PipelineName, run.PipelineVersion))
+	}
+	executions, err := e.store.ListRunExecutions(ctx, runID)
+	if err != nil {
+		return err
+	}
+	// Rebuild runtime state exclusively from persisted executions. This is what makes Advance safe
+	// after a process restart and prevents in-memory results from becoming a hidden dependency.
+	byNode := make(map[string]execution.Execution, len(executions))
+	outputs := make(map[string]json.RawMessage)
+	for _, item := range executions {
+		byNode[item.NodeKey] = item
+		if item.Status == execution.StatusSucceeded {
+			outputs[item.NodeKey] = item.Output
+		}
+		if item.Status == execution.StatusFailed || item.Status == execution.StatusCancelled {
+			return e.store.SetPipelineRunStatus(ctx, runID, run.Revision, execution.RunFailed, fmt.Sprintf("node %s: %s", item.NodeKey, item.LastError))
+		}
+	}
+	created := false
+	for _, node := range definition.nodes {
+		existing, exists := byNode[node.key]
+		if exists && existing.Status != execution.StatusBlocked {
+			continue
+		}
+		ready := true
+		for _, dependency := range node.dependencies {
+			if predecessor, ok := byNode[dependency]; !ok || predecessor.Status != execution.StatusSucceeded {
+				ready = false
+				break
+			}
+		}
+		if !ready {
+			continue
+		}
+		input, buildErr := safeBuildInput(node, run.Input, outputs)
+		if buildErr != nil {
+			statusErr := e.store.SetPipelineRunStatus(ctx, runID, run.Revision, execution.RunFailed, fmt.Sprintf("build node %s input: %v", node.key, buildErr))
+			return errors.Join(buildErr, statusErr)
+		}
+		if exists {
+			if err = e.store.ReleaseExecution(ctx, existing.ID, input, existing.AvailableAt); err != nil {
+				return err
+			}
+			created = true
+			continue
+		}
+		request := execution.CreateExecution{
+			TaskName: node.taskName, TaskVersion: node.taskVersion,
+			Input: input, MaxAttempts: node.maxAttempts,
+			PipelineRunID: &runID, NodeKey: node.key,
+			IdempotencyKey: runID.String() + ":" + node.key,
+		}
+		_, err = e.store.CreateExecution(ctx, request)
+		if err != nil {
+			return err
+		}
+		created = true
+	}
+	if len(definition.nodes) == 0 {
+		return e.store.SetPipelineRunStatus(ctx, runID, run.Revision, execution.RunSucceeded, "")
+	}
+	if len(byNode) == len(definition.nodes) {
+		allSucceeded := true
+		for _, item := range byNode {
+			if item.Status != execution.StatusSucceeded {
+				allSucceeded = false
+				break
+			}
+		}
+		if allSucceeded {
+			return e.store.SetPipelineRunStatus(ctx, runID, run.Revision, execution.RunSucceeded, "")
+		}
+	}
+	if created || run.Status == execution.RunPending {
+		return e.store.SetPipelineRunStatus(ctx, runID, run.Revision, execution.RunRunning, "")
+	}
+	return nil
+}
+
+// RestartExecution safely restarts a standalone task or a pipeline node and its existing
+// descendants. Pipeline descendants remain blocked until their rebuilt dependencies succeed.
+func (e *Engine) RestartExecution(ctx context.Context, executionID uuid.UUID) (execution.Execution, error) {
+	item, err := e.store.GetExecution(ctx, executionID)
+	if err != nil {
+		return execution.Execution{}, err
+	}
+	if item.PipelineRunID == nil {
+		return e.store.RestartExecution(ctx, executionID, time.Time{})
+	}
+	run, err := e.store.GetPipelineRun(ctx, *item.PipelineRunID)
+	if err != nil {
+		return execution.Execution{}, err
+	}
+	definition, ok := e.registry.definitions[registryKey(run.PipelineName, run.PipelineVersion)]
+	if !ok {
+		return execution.Execution{}, fmt.Errorf("pipeline definition %s is not registered", registryKey(run.PipelineName, run.PipelineVersion))
+	}
+	descendants, found := descendantKeys(definition, item.NodeKey)
+	if !found {
+		return execution.Execution{}, fmt.Errorf("pipeline node %q is not registered", item.NodeKey)
+	}
+	restarted, err := e.store.RestartPipelineSubgraph(ctx, execution.RestartSubgraph{
+		RunID: *item.PipelineRunID, RootNodeKey: item.NodeKey, DescendantKeys: descendants,
+	})
+	if err != nil {
+		return execution.Execution{}, err
+	}
+	if err = e.Advance(ctx, *item.PipelineRunID); err != nil {
+		return execution.Execution{}, err
+	}
+	return restarted, nil
+}
+
+func descendantKeys(definition compiledDefinition, root string) ([]string, bool) {
+	affected := map[string]struct{}{root: {}}
+	found := false
+	result := make([]string, 0)
+	for _, node := range definition.nodes {
+		if node.key == root {
+			found = true
+			continue
+		}
+		for _, dependency := range node.dependencies {
+			if _, ok := affected[dependency]; ok {
+				affected[node.key] = struct{}{}
+				result = append(result, node.key)
+				break
+			}
+		}
+	}
+	return result, found
+}
+
+func safeBuildInput(node *nodeDefinition, initial json.RawMessage, outputs map[string]json.RawMessage) (input json.RawMessage, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("pipeline mapper panic: %v", recovered)
+		}
+	}()
+	return node.buildInput(initial, outputs)
+}
+
+// Reconcile resumes pipeline runs left between durable task completion and DAG advancement.
+func (e *Engine) Reconcile(ctx context.Context) error {
+	runs, err := e.store.ListPipelineRuns(ctx, execution.RunFilter{Statuses: []execution.RunStatus{execution.RunPending, execution.RunRunning}})
+	if err != nil {
+		return err
+	}
+	var failures []error
+	for _, run := range runs {
+		if advanceErr := e.Advance(ctx, run.ID); advanceErr != nil {
+			failures = append(failures, fmt.Errorf("advance pipeline run %s: %w", run.ID, advanceErr))
+		}
+	}
+	return errors.Join(failures...)
+}
+
+// Inspect returns the complete persisted state of a pipeline run.
+func (e *Engine) Inspect(ctx context.Context, runID uuid.UUID) (Snapshot, error) {
+	run, err := e.store.GetPipelineRun(ctx, runID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	items, err := e.store.ListRunExecutions(ctx, runID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return Snapshot{Run: run, Executions: items}, nil
+}
+
+// Cancel marks a run cancelled and invalidates all unfinished node deliveries.
+func (e *Engine) Cancel(ctx context.Context, runID uuid.UUID, reason string) error {
+	run, err := e.store.GetPipelineRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	items, err := e.store.ListRunExecutions(ctx, runID)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item.Status == execution.StatusPending || item.Status == execution.StatusRetry || item.Status == execution.StatusRunning {
+			if err = e.store.CancelExecution(ctx, item.ID, reason); err != nil {
+				return err
+			}
+		}
+	}
+	return e.store.SetPipelineRunStatus(ctx, runID, run.Revision, execution.RunCancelled, reason)
+}
+
+// Output decodes one node's stored result.
+func Output[O any](ctx context.Context, store OutputReader, runID uuid.UUID, node Node[O]) (O, error) {
+	var zero O
+	executions, err := store.ListRunExecutions(ctx, runID)
+	if err != nil {
+		return zero, err
+	}
+	for _, item := range executions {
+		if item.NodeKey == node.key {
+			if item.Status != execution.StatusSucceeded {
+				return zero, fmt.Errorf("node %q is %s", node.key, item.Status)
+			}
+			if err = json.Unmarshal(item.Output, &zero); err != nil {
+				return zero, err
+			}
+			return zero, nil
+		}
+	}
+	return zero, execution.ErrNotFound
+}

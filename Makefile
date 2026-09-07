@@ -58,7 +58,7 @@ test-functional-integration: deps-test
 	$(GO_ENV) go test -count=1 -v -tags integration ./functional
 
 run-admin:
-	go run ./cmd/schedulor-admin
+	go run ./cmd/ody-admin
 
 install-lint: $(GOLANGCI_LINT)
 

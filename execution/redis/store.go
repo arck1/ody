@@ -13,10 +13,10 @@ import (
 	"github.com/google/uuid"
 	redislib "github.com/redis/go-redis/v9"
 
-	"schedulor/execution"
+	"ody/execution"
 )
 
-const defaultPrefix = "schedulor:{execution}:"
+const defaultPrefix = "ody:{execution}:"
 
 // Options configures Redis key names.
 type Options struct {

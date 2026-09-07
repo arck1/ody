@@ -8,8 +8,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"schedulor/execution"
-	"schedulor/worker"
+	"ody/execution"
+	"ody/worker"
 )
 
 // Logger is intentionally compatible with zap.SugaredLogger and simple application loggers.

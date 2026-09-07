@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/fx"
 
-	"schedulor"
-	"schedulor/execution"
-	"schedulor/task"
+	"ody"
+	"ody/execution"
+	"ody/task"
 )
 
 type FxLifecycleSuite struct{ suite.Suite }
@@ -26,10 +26,10 @@ func (s *FxLifecycleSuite) TestWorkerRunsAndStopsThroughFx() {
 	}))
 	s.Require().NoError(err)
 	store := execution.NewMemoryStore()
-	var runtime *schedulor.App
+	var runtime *ody.App
 	app := fx.New(
 		fx.Supply(fx.Annotate(store, fx.As(new(execution.Store)))),
-		schedulor.FxModule(schedulor.Tasks(module), schedulor.WithWorker(fastWorkerOptions())),
+		ody.FxModule(ody.Tasks(module), ody.WithWorker(fastWorkerOptions())),
 		fx.Populate(&runtime),
 		fx.NopLogger,
 	)

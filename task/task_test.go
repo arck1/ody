@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"schedulor/execution"
+	"ody/execution"
 )
 
 func TestTypedTaskPersistsInputAndOutput(t *testing.T) {

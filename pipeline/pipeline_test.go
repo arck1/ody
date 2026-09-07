@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"schedulor/execution"
-	"schedulor/task"
-	"schedulor/worker"
+	"ody/execution"
+	"ody/task"
+	"ody/worker"
 )
 
 type flowInput struct {

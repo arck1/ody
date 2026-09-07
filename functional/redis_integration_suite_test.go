@@ -12,12 +12,12 @@ import (
 	redislib "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/suite"
 
-	"schedulor/execution"
-	executionredis "schedulor/execution/redis"
-	"schedulor/monitoring"
-	"schedulor/pipeline"
-	"schedulor/task"
-	"schedulor/worker"
+	"ody/execution"
+	executionredis "ody/execution/redis"
+	"ody/monitoring"
+	"ody/pipeline"
+	"ody/task"
+	"ody/worker"
 )
 
 type RedisInfrastructureSuite struct {

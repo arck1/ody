@@ -7,7 +7,7 @@ import (
 	prom "github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/require"
 
-	"schedulor/execution"
+	"ody/execution"
 )
 
 func TestMetricsExposeTransitionsAndStoreState(t *testing.T) {
@@ -25,10 +25,10 @@ func TestMetricsExposeTransitionsAndStoreState(t *testing.T) {
 	names := make(map[string]bool)
 	for _, family := range families {
 		names[family.GetName()] = true
-		if family.GetName() == "schedulor_worker_task_transitions_total" {
+		if family.GetName() == "ody_worker_task_transitions_total" {
 			require.InDelta(t, 1, family.Metric[0].Counter.GetValue(), 0)
 		}
 	}
-	require.True(t, names["schedulor_store_task_executions"])
-	require.True(t, names["schedulor_worker_task_transitions_total"])
+	require.True(t, names["ody_store_task_executions"])
+	require.True(t, names["ody_worker_task_transitions_total"])
 }

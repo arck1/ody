@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"schedulor/task"
+	"ody/task"
 )
 
 type Definition[Input any] struct {

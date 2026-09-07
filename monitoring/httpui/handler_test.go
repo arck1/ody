@@ -9,8 +9,8 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"schedulor/execution"
-	"schedulor/monitoring"
+	"ody/execution"
+	"ody/monitoring"
 )
 
 type HandlerSuite struct {
@@ -69,5 +69,5 @@ func (s *HandlerSuite) TestValidationAndMetrics() {
 	index := httptest.NewRecorder()
 	s.handler.ServeHTTP(index, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil))
 	s.Equal(http.StatusOK, index.Code)
-	s.Contains(index.Body.String(), "Schedulor Operations")
+	s.Contains(index.Body.String(), "Ody Operations")
 }

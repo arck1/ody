@@ -1,6 +1,6 @@
-# schedulor
+# ody
 
-Schedulor — модульная Go-библиотека для типизированных фоновых задач и durable pipeline.
+Ody — модульная Go-библиотека для типизированных фоновых задач и durable pipeline.
 Выполнения, входы, результаты, попытки, lease и история переходов сохраняются через
 `execution.Store`; базовые реализации — in-memory, PostgreSQL и Redis.
 
@@ -29,9 +29,9 @@ module, err := task.NewModule("email",
 	}),
 )
 store := execution.NewMemoryStore()
-app, err := schedulor.New(store,
-	schedulor.Tasks(module),
-	schedulor.WithWorker(worker.Options{Concurrency: 4}),
+app, err := ody.New(store,
+	ody.Tasks(module),
+	ody.WithWorker(worker.Options{Concurrency: 4}),
 )
 
 created, err := sendEmail.Enqueue(ctx, app, EmailInput{To: "user@example.com"})
@@ -64,11 +64,11 @@ make test-functional-integration # нужен Docker; поднимает Postgre
 ## Operational UI
 
 ```bash
-export SCHEDULOR_DB_DSN='postgres://schedulor:schedulor@localhost:5432/schedulor?sslmode=disable'
-go run ./cmd/schedulor-admin --addr 127.0.0.1:8081 serve
+export ODY_DB_DSN='postgres://ody:ody@localhost:5432/ody?sslmode=disable'
+go run ./cmd/ody-admin --addr 127.0.0.1:8081 serve
 ```
 
-Для Redis: `SCHEDULOR_STORE=redis SCHEDULOR_REDIS_URL=redis://127.0.0.1:6379/0`.
+Для Redis: `ODY_STORE=redis ODY_REDIS_URL=redis://127.0.0.1:6379/0`.
 
 Dashboard будет доступен на `http://127.0.0.1:8081/`, метрики — на `/metrics`, JSON API — под
 `/api/tasks` и `/api/pipelines`. Перед публикацией наружу добавьте authentication и TLS на reverse

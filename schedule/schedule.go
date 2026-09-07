@@ -11,9 +11,9 @@ import (
 
 	"github.com/robfig/cron/v3"
 
-	"schedulor/execution"
-	"schedulor/pipeline"
-	"schedulor/task"
+	"ody/execution"
+	"ody/pipeline"
+	"ody/task"
 )
 
 type MisfirePolicy string

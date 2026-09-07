@@ -2,14 +2,14 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Schedulor Operations</title>
+  <title>Ody Operations</title>
   <style>
     :root{color-scheme:dark;--bg:#0d1117;--panel:#161b22;--line:#30363d;--text:#e6edf3;--muted:#8b949e;--accent:#58a6ff;--ok:#3fb950;--bad:#f85149}
     *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px ui-monospace,SFMono-Regular,Menlo,monospace}
     header{padding:24px 4vw;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}h1{font-size:20px;margin:0}button,select,input{background:var(--panel);border:1px solid var(--line);color:var(--text);padding:8px 10px;border-radius:6px}button{cursor:pointer}button:hover{border-color:var(--accent)}main{padding:24px 4vw}.tabs{display:flex;gap:8px;margin-bottom:16px}.active{border-color:var(--accent);color:var(--accent)}.toolbar{display:flex;gap:8px;margin-bottom:12px}table{width:100%;border-collapse:collapse;background:var(--panel)}th,td{padding:10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}th{color:var(--muted)}tr{cursor:pointer}tr:hover{background:#1f2630}.status-succeeded{color:var(--ok)}.status-failed,.status-cancelled{color:var(--bad)}dialog{width:min(900px,94vw);max-height:90vh;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:8px}pre{white-space:pre-wrap;overflow:auto}.actions{display:flex;gap:8px;justify-content:flex-end}.muted{color:var(--muted)}
   </style>
 </head>
-<body><header><h1>Schedulor Operations</h1><span class="muted" id="health">durable execution store</span></header>
+<body><header><h1>Ody Operations</h1><span class="muted" id="health">durable execution store</span></header>
 <main><div class="tabs"><button id="tasksTab" class="active">Задачи</button><button id="pipelinesTab">Пайплайны</button></div>
 <div class="toolbar"><select id="status"><option value="">Все статусы</option></select><input id="name" placeholder="Имя задачи"><button id="refresh">Обновить</button></div>
 <table><thead id="head"></thead><tbody id="tbody"></tbody></table></main>

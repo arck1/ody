@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"schedulor/execution"
-	"schedulor/task"
+	"ody/execution"
+	"ody/task"
 )
 
 func TestLeaseLossCancelsHandlerContext(t *testing.T) {

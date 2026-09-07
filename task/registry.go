@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"schedulor/execution"
+	"ody/execution"
 )
 
 var ErrUnknownTask = errors.New("unknown task")

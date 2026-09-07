@@ -8,10 +8,10 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"schedulor/execution"
-	"schedulor/pipeline"
-	"schedulor/task"
-	"schedulor/worker"
+	"ody/execution"
+	"ody/pipeline"
+	"ody/task"
+	"ody/worker"
 )
 
 type PipelineFailureSuite struct{ suite.Suite }

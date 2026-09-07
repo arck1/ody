@@ -7,10 +7,10 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"schedulor"
-	"schedulor/execution"
-	"schedulor/schedule"
-	"schedulor/task"
+	"ody"
+	"ody/execution"
+	"ody/schedule"
+	"ody/task"
 )
 
 type SchedulerSuite struct{ suite.Suite }
@@ -33,10 +33,10 @@ func (s *SchedulerSuite) TestAppRecoversLatestMisfireIntoWorkerQueue() {
 	)
 	s.Require().NoError(err)
 	store := execution.NewMemoryStore()
-	app, err := schedulor.New(store,
-		schedulor.Tasks(module),
-		schedulor.Schedules(cronDefinition),
-		schedulor.WithWorker(fastWorkerOptions()),
+	app, err := ody.New(store,
+		ody.Tasks(module),
+		ody.Schedules(cronDefinition),
+		ody.WithWorker(fastWorkerOptions()),
 	)
 	s.Require().NoError(err)
 	ctx, cancel := context.WithCancel(context.Background())

@@ -7,9 +7,9 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"schedulor/execution"
-	"schedulor/task"
-	"schedulor/worker"
+	"ody/execution"
+	"ody/task"
+	"ody/worker"
 )
 
 type StandaloneTaskSuite struct{ suite.Suite }

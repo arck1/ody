@@ -1,15 +1,15 @@
-# Schedulor Agent Guide
+# Ody Agent Guide
 
 This file is the source of truth for coding agents working in this repository. `README.md` and
 `docs/` are user-facing and must stay consistent with public behavior.
 
 ## Project purpose
 
-Schedulor is a Go library for durable, typed background jobs and persistent DAG pipelines. It
+Ody is a Go library for durable, typed background jobs and persistent DAG pipelines. It
 supports standalone construction and optional Uber Fx lifecycle integration. PostgreSQL and Redis
 are production Stores; the memory Store supports tests and local scenarios.
 
-The module path is `schedulor`. The required Go version is declared in `go.mod`.
+The module path is `ody`. The required Go version is declared in `go.mod`.
 
 ## Architecture
 
@@ -53,12 +53,12 @@ when a new component does not need the full Store.
   policy, and durable tick idempotency.
 - `worker`: standalone concurrent worker with polling, timeout, lease heartbeat, retry, result
   persistence, observer callbacks, and pipeline advancement.
-- root `schedulor.App`: common standalone/Fx composition facade over Store, worker, and pipeline.
+- root `ody.App`: common standalone/Fx composition facade over Store, worker, and pipeline.
 - `worker/fx`: low-level Fx lifecycle adapter for custom worker assembly.
 - `monitoring`: transport-neutral read/control interfaces and service.
 - `monitoring/prometheus`: worker observer metrics and persisted-state collector.
 - `monitoring/httpui`: embedded operator dashboard and JSON API.
-- `cmd/schedulor-admin`: PostgreSQL-backed operational CLI and web server.
+- `cmd/ody-admin`: PostgreSQL-backed operational CLI and web server.
 - `functional`: public-API behavior suites; integration-tagged suites use real PostgreSQL and Redis.
 
 The root package is the preferred composition API; low-level packages remain available for custom

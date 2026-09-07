@@ -7,8 +7,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"schedulor/execution"
-	"schedulor/worker"
+	"ody/execution"
+	"ody/worker"
 )
 
 type recordingLogger struct {

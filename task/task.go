@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"schedulor/execution"
+	"ody/execution"
 )
 
 var ErrEmptyName = errors.New("task name is empty")

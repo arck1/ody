@@ -7,11 +7,11 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
-	"schedulor"
-	"schedulor/execution"
-	"schedulor/monitoring"
-	"schedulor/pipeline"
-	"schedulor/task"
+	"ody"
+	"ody/execution"
+	"ody/monitoring"
+	"ody/pipeline"
+	"ody/task"
 )
 
 type PipelineRestartSuite struct{ suite.Suite }
@@ -38,10 +38,10 @@ func (s *PipelineRestartSuite) TestRestartRecomputesDescendantsThroughPublicApp(
 	first := pipeline.Start(flow, "read", read, func(struct{}) struct{} { return struct{}{} })
 	last := pipeline.Then(flow, first, "transform", transform, func(value int) int { return value })
 	store := execution.NewMemoryStore()
-	app, err := schedulor.New(store,
-		schedulor.Tasks(module),
-		schedulor.Pipelines(flow),
-		schedulor.WithWorker(fastWorkerOptions()),
+	app, err := ody.New(store,
+		ody.Tasks(module),
+		ody.Pipelines(flow),
+		ody.WithWorker(fastWorkerOptions()),
 	)
 	s.Require().NoError(err)
 	run, err := pipeline.Run(context.Background(), app.PipelineEngine(), flow, struct{}{})

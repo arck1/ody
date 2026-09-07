@@ -40,7 +40,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - schedulor
+        - ody
 
 issues:
   max-issues-per-linter: 0

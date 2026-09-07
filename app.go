@@ -1,5 +1,5 @@
-// Package schedulor provides the high-level runtime for typed durable tasks and pipelines.
-package schedulor
+// Package ody provides the high-level runtime for typed durable tasks and pipelines.
+package ody
 
 import (
 	"context"
@@ -9,11 +9,11 @@ import (
 
 	"github.com/google/uuid"
 
-	"schedulor/execution"
-	"schedulor/pipeline"
-	"schedulor/schedule"
-	"schedulor/task"
-	"schedulor/worker"
+	"ody/execution"
+	"ody/pipeline"
+	"ody/schedule"
+	"ody/task"
+	"ody/worker"
 )
 
 type Option func(*configuration)
@@ -67,7 +67,7 @@ type App struct {
 
 func New(store execution.Store, options ...Option) (*App, error) {
 	if store == nil {
-		return nil, errors.New("schedulor store is nil")
+		return nil, errors.New("ody store is nil")
 	}
 	config := configuration{}
 	for _, option := range options {
@@ -100,7 +100,7 @@ func New(store execution.Store, options ...Option) (*App, error) {
 
 func (a *App) Run(ctx context.Context) error {
 	if a == nil || a.worker == nil {
-		return errors.New("schedulor app is nil")
+		return errors.New("ody app is nil")
 	}
 	runCtx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
@@ -121,14 +121,14 @@ func (a *App) Run(ctx context.Context) error {
 
 func (a *App) CreateExecution(ctx context.Context, request execution.CreateExecution) (execution.Execution, error) {
 	if a == nil || a.store == nil {
-		return execution.Execution{}, errors.New("schedulor app is nil")
+		return execution.Execution{}, errors.New("ody app is nil")
 	}
 	return a.store.CreateExecution(ctx, request)
 }
 
 func (a *App) RestartExecution(ctx context.Context, id uuid.UUID) (execution.Execution, error) {
 	if a == nil || a.pipelines == nil {
-		return execution.Execution{}, errors.New("schedulor app is nil")
+		return execution.Execution{}, errors.New("ody app is nil")
 	}
 	return a.pipelines.RestartExecution(ctx, id)
 }

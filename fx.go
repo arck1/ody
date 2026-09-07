@@ -1,4 +1,4 @@
-package schedulor
+package ody
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/fx"
 
-	"schedulor/execution"
+	"ody/execution"
 )
 
 // FxModule constructs the same App used by standalone applications and attaches it to Fx's
@@ -25,7 +25,7 @@ func registerAppLifecycle(lifecycle fx.Lifecycle, app *App) {
 	lifecycle.Append(fx.Hook{
 		OnStart: func(context.Context) error {
 			if cancel != nil {
-				return errors.New("schedulor app already started")
+				return errors.New("ody app already started")
 			}
 			ctx, stop := context.WithCancel(context.Background())
 			cancel = stop
@@ -44,7 +44,7 @@ func registerAppLifecycle(lifecycle fx.Lifecycle, app *App) {
 				}
 				return err
 			case <-ctx.Done():
-				return fmt.Errorf("stop schedulor app: %w", ctx.Err())
+				return fmt.Errorf("stop ody app: %w", ctx.Err())
 			}
 		},
 	})

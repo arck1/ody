@@ -20,28 +20,28 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	redislib "github.com/redis/go-redis/v9"
 
-	"schedulor/execution"
-	executionpostgres "schedulor/execution/postgres"
-	executionredis "schedulor/execution/redis"
-	"schedulor/monitoring"
-	"schedulor/monitoring/httpui"
-	monitoringprom "schedulor/monitoring/prometheus"
+	"ody/execution"
+	executionpostgres "ody/execution/postgres"
+	executionredis "ody/execution/redis"
+	"ody/monitoring"
+	"ody/monitoring/httpui"
+	monitoringprom "ody/monitoring/prometheus"
 )
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		_, _ = fmt.Fprintln(os.Stderr, "schedulor-admin:", err)
+		_, _ = fmt.Fprintln(os.Stderr, "ody-admin:", err)
 		os.Exit(1)
 	}
 }
 
 func run(args []string) error {
-	global := flag.NewFlagSet("schedulor-admin", flag.ContinueOnError)
-	backend := global.String("store", env("SCHEDULOR_STORE", "postgres"), "execution store: postgres|redis")
-	dsn := global.String("db-dsn", env("SCHEDULOR_DB_DSN", ""), "PostgreSQL DSN")
-	redisURL := global.String("redis-url", env("SCHEDULOR_REDIS_URL", "redis://127.0.0.1:6379/0"), "Redis URL")
-	redisPrefix := global.String("redis-prefix", env("SCHEDULOR_REDIS_PREFIX", ""), "Redis key prefix")
-	addr := global.String("addr", env("SCHEDULOR_ADMIN_ADDR", "127.0.0.1:8081"), "HTTP listen address")
+	global := flag.NewFlagSet("ody-admin", flag.ContinueOnError)
+	backend := global.String("store", env("ODY_STORE", "postgres"), "execution store: postgres|redis")
+	dsn := global.String("db-dsn", env("ODY_DB_DSN", ""), "PostgreSQL DSN")
+	redisURL := global.String("redis-url", env("ODY_REDIS_URL", "redis://127.0.0.1:6379/0"), "Redis URL")
+	redisPrefix := global.String("redis-prefix", env("ODY_REDIS_PREFIX", ""), "Redis key prefix")
+	addr := global.String("addr", env("ODY_ADMIN_ADDR", "127.0.0.1:8081"), "HTTP listen address")
 	if err := global.Parse(args); err != nil {
 		return err
 	}
@@ -67,7 +67,7 @@ func openStore(ctx context.Context, backend, dsn, redisURL, redisPrefix string) 
 	switch backend {
 	case "postgres":
 		if dsn == "" {
-			return nil, func() {}, errors.New("SCHEDULOR_DB_DSN or --db-dsn is required for postgres")
+			return nil, func() {}, errors.New("ODY_DB_DSN or --db-dsn is required for postgres")
 		}
 		db, err := sql.Open("pgx", dsn)
 		if err != nil {

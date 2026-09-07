@@ -28,7 +28,7 @@ binding := task.Handle(GenerateInvoice,
 )
 ```
 
-Schedulor декодирует сохранённый JSON input и кодирует output. Ошибка декодирования/кодирования
+Ody декодирует сохранённый JSON input и кодирует output. Ошибка декодирования/кодирования
 считается permanent. Panic handler перехватывается и превращается в ошибку выполнения.
 
 Handler может выполниться повторно после потери lease или сбоя между внешним side effect и записью

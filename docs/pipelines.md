@@ -43,11 +43,11 @@ Root nodes могут выполняться параллельно. `Join2` с�
 ## Регистрация и запуск
 
 ```go
-app, err := schedulor.New(store,
-    schedulor.Tasks(taskModule),
-    schedulor.Pipelines(flow),
-    schedulor.Observe(observer),
-    schedulor.WithWorker(workerOptions),
+app, err := ody.New(store,
+    ody.Tasks(taskModule),
+    ody.Pipelines(flow),
+    ody.Observe(observer),
+    ody.WithWorker(workerOptions),
 )
 
 run, err := pipeline.Run(ctx, app.PipelineEngine(), flow, ImportInput{URL: url})

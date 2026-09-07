@@ -68,7 +68,7 @@ heartbeat, retry, отмену и restart. Переходы одной запи�
 `execution.PipelineRepository`; полный `execution.Store` объединяет их. Это позволяет прикладным
 компонентам принимать только нужную часть API, при этом стандартные Store реализуют все три части.
 
-Prefix по умолчанию — `schedulor:{execution}:`. Для Redis Cluster сохраняйте общий hash tag во
+Prefix по умолчанию — `ody:{execution}:`. Для Redis Cluster сохраняйте общий hash tag во
 всех ключах одного Store. Разным окружениям и приложениям задавайте разные prefix.
 
 Для production Redis используйте `maxmemory-policy noeviction`: частичное вытеснение execution,
@@ -108,7 +108,7 @@ Worker сообщает переходы выполнения через инт�
 
 ```go
 observer, err := zapobserver.NewSugared(logger.Sugar())
-app, err := schedulor.New(store, schedulor.Observe(observer))
+app, err := ody.New(store, ody.Observe(observer))
 ```
 
 `zapobserver.New` принимает небольшой интерфейс `Infow/Errorw`, поэтому совместим и с другими
@@ -118,8 +118,8 @@ app, err := schedulor.New(store, schedulor.Observe(observer))
 
 Operational CLI:
 
-- `SCHEDULOR_DB_DSN` — PostgreSQL DSN;
-- `SCHEDULOR_STORE` — `postgres` (default) или `redis`;
-- `SCHEDULOR_REDIS_URL` — Redis URL, default `redis://127.0.0.1:6379/0`;
-- `SCHEDULOR_REDIS_PREFIX` — namespace ключей Redis;
-- `SCHEDULOR_ADMIN_ADDR` — адрес web server, default `127.0.0.1:8081`.
+- `ODY_DB_DSN` — PostgreSQL DSN;
+- `ODY_STORE` — `postgres` (default) или `redis`;
+- `ODY_REDIS_URL` — Redis URL, default `redis://127.0.0.1:6379/0`;
+- `ODY_REDIS_PREFIX` — namespace ключей Redis;
+- `ODY_ADMIN_ADDR` — адрес web server, default `127.0.0.1:8081`.

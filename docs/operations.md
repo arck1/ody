@@ -2,7 +2,7 @@
 
 ## Standalone
 
-`schedulor.App.Run(ctx)` блокируется до отмены контекста:
+`ody.App.Run(ctx)` блокируется до отмены контекста:
 
 ```go
 ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -18,7 +18,7 @@ if err := app.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 
 ## Uber Fx
 
-Fx создаёт тот же `schedulor.App`, который используется при standalone-запуске. Store предоставьте
+Fx создаёт тот же `ody.App`, который используется при standalone-запуске. Store предоставьте
 как интерфейс `execution.Store`:
 
 ```go
@@ -26,11 +26,11 @@ app := fx.New(
     fx.Provide(
         fx.Annotate(newStore, fx.As(new(execution.Store))),
     ),
-    schedulor.FxModule(
-        schedulor.Tasks(emailModule),
-        schedulor.Pipelines(importPipeline),
-        schedulor.Observe(observer),
-        schedulor.WithWorker(options),
+    ody.FxModule(
+        ody.Tasks(emailModule),
+        ody.Pipelines(importPipeline),
+        ody.Observe(observer),
+        ody.WithWorker(options),
     ),
 )
 app.Run()
@@ -55,27 +55,27 @@ labels: это создаёт высокую cardinality.
 ## Operational CLI
 
 ```bash
-export SCHEDULOR_DB_DSN='postgres://schedulor:schedulor@localhost:5432/schedulor?sslmode=disable'
+export ODY_DB_DSN='postgres://ody:ody@localhost:5432/ody?sslmode=disable'
 
-go run ./cmd/schedulor-admin tasks -status running -limit 100
-go run ./cmd/schedulor-admin tasks -name email.send -status failed
-go run ./cmd/schedulor-admin task '<execution-uuid>'
-go run ./cmd/schedulor-admin pipelines -status running,failed -limit 100
-go run ./cmd/schedulor-admin pipeline '<pipeline-uuid>'
-go run ./cmd/schedulor-admin restart '<execution-uuid>'
-go run ./cmd/schedulor-admin cancel '<execution-uuid>' 'requested by customer'
-go run ./cmd/schedulor-admin purge -older-than 720h -limit 1000
+go run ./cmd/ody-admin tasks -status running -limit 100
+go run ./cmd/ody-admin tasks -name email.send -status failed
+go run ./cmd/ody-admin task '<execution-uuid>'
+go run ./cmd/ody-admin pipelines -status running,failed -limit 100
+go run ./cmd/ody-admin pipeline '<pipeline-uuid>'
+go run ./cmd/ody-admin restart '<execution-uuid>'
+go run ./cmd/ody-admin cancel '<execution-uuid>' 'requested by customer'
+go run ./cmd/ody-admin purge -older-than 720h -limit 1000
 ```
 
 CLI и web UI могут работать с Redis без изменения команд:
 
 ```bash
-export SCHEDULOR_STORE=redis
-export SCHEDULOR_REDIS_URL='redis://127.0.0.1:6379/0'
-export SCHEDULOR_REDIS_PREFIX='myapp:{execution}:'
+export ODY_STORE=redis
+export ODY_REDIS_URL='redis://127.0.0.1:6379/0'
+export ODY_REDIS_PREFIX='myapp:{execution}:'
 
-go run ./cmd/schedulor-admin tasks -status running
-go run ./cmd/schedulor-admin serve
+go run ./cmd/ody-admin tasks -status running
+go run ./cmd/ody-admin serve
 ```
 
 Вывод CLI — JSON, поэтому его можно передавать в `jq`.
@@ -92,7 +92,7 @@ HTTP-списки ограничены 100 элементами по умолч�
 ## Web UI и JSON API
 
 ```bash
-go run ./cmd/schedulor-admin --addr 127.0.0.1:8081 serve
+go run ./cmd/ody-admin --addr 127.0.0.1:8081 serve
 ```
 
 - dashboard: `GET /`;

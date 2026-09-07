@@ -5,17 +5,17 @@
 
 ## 0. Подключите модуль
 
-Текущий module path проекта — `schedulor`. Для локального приложения рядом с checkout:
+Текущий module path проекта — `ody`. Для локального приложения рядом с checkout:
 
 ```bash
-go mod edit -require=schedulor@v0.0.0
-go mod edit -replace=schedulor=../schedulor
+go mod edit -require=ody@v0.0.0
+go mod edit -replace=ody=../ody
 go mod tidy
 ```
 
 После публикации библиотеки замените module path и imports на адрес репозитория с выбранной
-semantic version. В примерах используются imports `schedulor/task`, `schedulor/execution`,
-`schedulor/execution/postgres`, `schedulor/pipeline` и `schedulor/worker`.
+semantic version. В примерах используются imports `ody/task`, `ody/execution`,
+`ody/execution/postgres`, `ody/pipeline` и `ody/worker`.
 
 Нужны версия Go из `go.mod` и PostgreSQL либо Redis для durable production Store.
 `execution.MemoryStore` подходит для тестов и локальных однопроцессных сценариев.
@@ -96,9 +96,9 @@ if err != nil {
     return err
 }
 
-app, err := schedulor.New(store,
-    schedulor.Tasks(emailModule),
-    schedulor.WithWorker(worker.Options{
+app, err := ody.New(store,
+    ody.Tasks(emailModule),
+    ody.WithWorker(worker.Options{
         ID:                "email-worker-1",
         Concurrency:       8,
         PollInterval:      100 * time.Millisecond,

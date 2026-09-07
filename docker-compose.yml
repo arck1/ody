@@ -1,15 +1,15 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: schedulor-postgres
+    container_name: ody-postgres
     environment:
-      POSTGRES_DB: schedulor
-      POSTGRES_USER: schedulor
-      POSTGRES_PASSWORD: schedulor
+      POSTGRES_DB: ody
+      POSTGRES_USER: ody
+      POSTGRES_PASSWORD: ody
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U schedulor -d schedulor"]
+      test: ["CMD-SHELL", "pg_isready -U ody -d ody"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -18,7 +18,7 @@ services:
 
   redis:
     image: redis:7.4-alpine
-    container_name: schedulor-redis
+    container_name: ody-redis
     ports:
       - "6379:6379"
     healthcheck:

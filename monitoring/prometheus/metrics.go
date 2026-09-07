@@ -8,8 +8,8 @@ import (
 
 	prom "github.com/prometheus/client_golang/prometheus"
 
-	"schedulor/execution"
-	"schedulor/worker"
+	"ody/execution"
+	"ody/worker"
 )
 
 type Metrics struct {
@@ -29,20 +29,20 @@ func New(registerer prom.Registerer, store execution.StatisticsReader) (*Metrics
 	}
 	metrics := &Metrics{
 		transitions: prom.NewCounterVec(prom.CounterOpts{
-			Namespace: "schedulor", Subsystem: "worker", Name: "task_transitions_total",
+			Namespace: "ody", Subsystem: "worker", Name: "task_transitions_total",
 			Help: "Number of task state transitions observed by workers.",
 		}, []string{"task", "status"}),
 		duration: prom.NewHistogramVec(prom.HistogramOpts{
-			Namespace: "schedulor", Subsystem: "worker", Name: "task_duration_seconds",
+			Namespace: "ody", Subsystem: "worker", Name: "task_duration_seconds",
 			Help:    "Task processing duration from first start to terminal transition.",
 			Buckets: prom.DefBuckets,
 		}, []string{"task", "status"}),
 		errors: prom.NewCounterVec(prom.CounterOpts{
-			Namespace: "schedulor", Subsystem: "worker", Name: "observer_errors_total",
+			Namespace: "ody", Subsystem: "worker", Name: "observer_errors_total",
 			Help: "Number of worker transition errors reported to the observer.",
 		}, []string{"task"}),
 		infrastructureErrors: prom.NewCounterVec(prom.CounterOpts{
-			Namespace: "schedulor", Subsystem: "worker", Name: "infrastructure_errors_total",
+			Namespace: "ody", Subsystem: "worker", Name: "infrastructure_errors_total",
 			Help: "Number of worker infrastructure errors by operation.",
 		}, []string{"operation"}),
 	}
@@ -88,9 +88,9 @@ type storeCollector struct {
 func newStoreCollector(store execution.StatisticsReader) *storeCollector {
 	return &storeCollector{
 		store:          store,
-		executionsDesc: prom.NewDesc("schedulor_store_task_executions", "Current persisted task executions by task and status.", []string{"task", "status"}, nil),
-		pipelinesDesc:  prom.NewDesc("schedulor_store_pipeline_runs", "Current persisted pipeline runs by pipeline and status.", []string{"pipeline", "status"}, nil),
-		scrapeErrors:   prom.NewDesc("schedulor_store_scrape_error", "Whether the latest durable state scrape failed.", nil, nil),
+		executionsDesc: prom.NewDesc("ody_store_task_executions", "Current persisted task executions by task and status.", []string{"task", "status"}, nil),
+		pipelinesDesc:  prom.NewDesc("ody_store_pipeline_runs", "Current persisted pipeline runs by pipeline and status.", []string{"pipeline", "status"}, nil),
+		scrapeErrors:   prom.NewDesc("ody_store_scrape_error", "Whether the latest durable state scrape failed.", nil, nil),
 	}
 }
 

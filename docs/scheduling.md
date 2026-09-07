@@ -19,9 +19,9 @@ dailyReport, err := schedule.Task(
     schedule.WithMisfire(schedule.MisfireLatest, 24*time.Hour, 1),
 )
 
-app, err := schedulor.New(store,
-    schedulor.Tasks(reportModule),
-    schedulor.Schedules(dailyReport),
+app, err := ody.New(store,
+    ody.Tasks(reportModule),
+    ody.Schedules(dailyReport),
 )
 ```
 
@@ -38,10 +38,10 @@ nightlyImport, err := schedule.Pipeline(
     func(at time.Time) ImportInput { return ImportInput{Date: at} },
 )
 
-app, err := schedulor.New(store,
-    schedulor.Tasks(importTasks),
-    schedulor.Pipelines(importPipeline),
-    schedulor.Schedules(nightlyImport),
+app, err := ody.New(store,
+    ody.Tasks(importTasks),
+    ody.Pipelines(importPipeline),
+    ody.Schedules(nightlyImport),
 )
 ```
 

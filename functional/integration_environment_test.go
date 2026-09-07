@@ -15,7 +15,7 @@ import (
 	postgrescontainer "github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	executionpostgres "schedulor/execution/postgres"
+	executionpostgres "ody/execution/postgres"
 )
 
 const (
@@ -28,9 +28,9 @@ func startPostgres(t *testing.T) (*sql.DB, *executionpostgres.Store) {
 	testcontainers.SkipIfProviderIsNotHealthy(t)
 	ctx := context.Background()
 	container, err := postgrescontainer.Run(ctx, postgresImage,
-		postgrescontainer.WithDatabase("schedulor_functional"),
-		postgrescontainer.WithUsername("schedulor"),
-		postgrescontainer.WithPassword("schedulor"),
+		postgrescontainer.WithDatabase("ody_functional"),
+		postgrescontainer.WithUsername("ody"),
+		postgrescontainer.WithPassword("ody"),
 		testcontainers.WithWaitStrategy(wait.ForListeningPort("5432/tcp").WithStartupTimeout(time.Minute)),
 	)
 	require.NoError(t, err)

@@ -1,4 +1,4 @@
-package schedulor
+package ody
 
 import (
 	"context"
@@ -8,9 +8,9 @@ import (
 
 	"go.uber.org/fx"
 
-	"schedulor/execution"
-	"schedulor/task"
-	"schedulor/worker"
+	"ody/execution"
+	"ody/task"
+	"ody/worker"
 )
 
 func TestAppRunsTypedTaskStandalone(t *testing.T) {

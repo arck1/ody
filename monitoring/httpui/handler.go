@@ -12,8 +12,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"schedulor/execution"
-	"schedulor/monitoring"
+	"ody/execution"
+	"ody/monitoring"
 )
 
 //go:embed index.html
